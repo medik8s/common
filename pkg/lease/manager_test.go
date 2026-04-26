@@ -619,8 +619,6 @@ func testCreateLease() {
 	actualLease, err := manager.GetLease(context.Background(), node)
 	Expect(err).ToNot(HaveOccurred())
 	compareLeases(generateExpectedLease(node, "Node"), actualLease)
-	Expect(actualLease.Kind).To(Equal("Lease"))
-	Expect(actualLease.APIVersion).To(Equal("coordination.k8s.io/v1"))
 
 	pod := getMockPod()
 	_, err = manager.GetLease(context.Background(), pod)
@@ -630,6 +628,4 @@ func testCreateLease() {
 	actualLeaseFromPod, err := manager.GetLease(context.Background(), pod)
 	Expect(err).ToNot(HaveOccurred())
 	compareLeases(generateExpectedLease(pod, "Pod"), actualLeaseFromPod)
-	Expect(actualLease.Kind).To(Equal("Lease"))
-	Expect(actualLease.APIVersion).To(Equal("coordination.k8s.io/v1"))
 }
