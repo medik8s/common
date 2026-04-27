@@ -44,8 +44,9 @@ func TaintExists(taints []corev1.Taint, taintToFind *corev1.Taint) bool {
 	return false
 }
 
-// DeleteTaint removes all the taints that have the same key and effect to given taintToDelete.
-func DeleteTaint(taints []corev1.Taint, taintToDelete *corev1.Taint) ([]corev1.Taint, bool) {
+// FilterOutTaint returns a new taint slice without taints matching the given taintToDelete by key and effect.
+// Also returns true if any taints were filtered out, false otherwise.
+func FilterOutTaint(taints []corev1.Taint, taintToDelete *corev1.Taint) ([]corev1.Taint, bool) {
 	var newTaints []corev1.Taint
 	deleted := false
 	for i := range taints {
