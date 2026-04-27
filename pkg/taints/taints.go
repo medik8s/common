@@ -25,13 +25,17 @@ const (
 	minK8sMinorVersionGAOutOfServiceTaint = 28
 )
 
+// OutOfServiceTaintInfo contains information about out-of-service taint support in the cluster
+type OutOfServiceTaintInfo struct {
+	Supported bool // true if k8s version >= 1.26
+	GA        bool // true if k8s version >= 1.28
+}
+
 var (
-	loggerTaint = ctrl.Log.WithName("taints")
-	//IsOutOfServiceTaintSupported will be set to true in case OutOfServiceTaint is supported (k8s 1.26 or higher)
-	IsOutOfServiceTaintSupported bool
-	//IsOutOfServiceTaintGA will be set to true in case OutOfServiceTaint is GA (k8s 1.28 or higher)
-	IsOutOfServiceTaintGA bool
-	leadingDigits         = regexp.MustCompile(`^(\d+)`)
+	loggerTaint   = ctrl.Log.WithName("taints")
+	leadingDigits = regexp.MustCompile(`^(\d+)`)
+
+	taintInfo OutOfServiceTaintInfo
 )
 
 // TaintExists checks if the given taint exists in list of taints. Returns true if exists false otherwise.
@@ -70,9 +74,14 @@ func CreateOutOfServiceTaint() corev1.Taint {
 	}
 }
 
-// InitOutOfServiceTaintFlagsWithRetry tries to initialize the OutOfService flags based on k8s version, in case it fails (potentially due to network issues) it will retry for a limited number of times
-func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Config) error {
+// GetOutOfServiceTaintInfo returns the cached out-of-service taint information.
+// Must call InitOutOfServiceTaintFlagsWithRetry first to initialize.
+func GetOutOfServiceTaintInfo() OutOfServiceTaintInfo {
+	return taintInfo
+}
 
+// InitOutOfServiceTaintFlagsWithRetry tries to initialize the OutOfService taint info based on k8s version, in case it fails (potentially due to network issues) it will retry for a limited number of times.
+func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Config) error {
 	var err error
 	interval := 2 * time.Second // retry every 2 seconds
 	timeout := 10 * time.Second // for a period of 10 seconds
@@ -118,9 +127,9 @@ func setOutOfTaintFlags(version *version.Info) error {
 		return err
 	}
 
-	IsOutOfServiceTaintSupported = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionSupportingOutOfServiceTaint)
-	loggerTaint.Info("out of service taint strategy", "isSupported", IsOutOfServiceTaintSupported, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
-	IsOutOfServiceTaintGA = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionGAOutOfServiceTaint)
-	loggerTaint.Info("out of service taint strategy", "isGA", IsOutOfServiceTaintGA, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
+	taintInfo.Supported = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionSupportingOutOfServiceTaint)
+	loggerTaint.Info("out of service taint strategy", "isSupported", taintInfo.Supported, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
+	taintInfo.GA = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionGAOutOfServiceTaint)
+	loggerTaint.Info("out of service taint strategy", "isGA", taintInfo.GA, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
 	return nil
 }
