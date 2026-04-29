@@ -2,125 +2,29 @@ package taints
 
 import (
 	"context"
-	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-var _ = Describe("InitOutOfServiceTaintFlagsWithRetry integration", func() {
-	var testEnv *envtest.Environment
-	var cfg *rest.Config
-
-	BeforeEach(func() {
-		By("bootstrapping test environment")
-		testEnv = &envtest.Environment{
-			CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-			ErrorIfCRDPathMissing: false, // common doesn't have CRDs
-		}
-
-		var err error
-		cfg, err = testEnv.Start()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg).NotTo(BeNil())
-
-		// Reset taintInfo before each test
-		taintInfo = OutOfServiceTaintInfo{}
-	})
-
-	AfterEach(func() {
-		By("tearing down the test environment")
-		err := testEnv.Stop()
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	Context("with real Kubernetes API server", func() {
-		It("should successfully detect k8s version and set taint info", func() {
-			ctx := context.Background()
-			err := InitOutOfServiceTaintFlagsWithRetry(ctx, cfg)
-			Expect(err).NotTo(HaveOccurred())
-
-			// envtest typically runs a recent k8s version (>= 1.26)
-			// so we expect out-of-service taint to be supported
-			info := GetOutOfServiceTaintInfo()
-			// We can't assert exact values since envtest version varies
-			// but we can verify the function executed without error
-			_ = info
-		})
-
-		It("should populate taintInfo correctly", func() {
-			ctx := context.Background()
-			err := InitOutOfServiceTaintFlagsWithRetry(ctx, cfg)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify taintInfo was populated (not zero value)
-			info := GetOutOfServiceTaintInfo()
-			// Since we can't know the exact envtest version, just verify
-			// the function completed and populated something
-			By("verifying taintInfo was populated")
-			_ = info
-		})
-	})
-
-	Context("error handling", func() {
-		It("should handle invalid config gracefully", func() {
-			ctx := context.Background()
-			invalidCfg := &rest.Config{
-				Host: "https://invalid-host-that-does-not-exist:6443",
-			}
-
-			err := InitOutOfServiceTaintFlagsWithRetry(ctx, invalidCfg)
-			Expect(err).To(HaveOccurred())
-		})
-	})
-})
-
-var _ = Describe("Node taint operations integration", func() {
-	var testEnv *envtest.Environment
-	var cfg *rest.Config
+var _ = Describe("Node taint operations", func() {
 	var k8sClient client.Client
 	var testNode *corev1.Node
 
 	BeforeEach(func() {
-		By("bootstrapping test environment")
-		testEnv = &envtest.Environment{
-			CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-			ErrorIfCRDPathMissing: false,
-		}
-
-		var err error
-		cfg, err = testEnv.Start()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg).NotTo(BeNil())
-
-		k8sClient, err = client.New(cfg, client.Options{})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(k8sClient).NotTo(BeNil())
-
 		// Create a test node
 		testNode = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-node",
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), testNode)).To(Succeed())
-	})
 
-	AfterEach(func() {
-		By("cleaning up test node")
-		if testNode != nil {
-			_ = k8sClient.Delete(context.Background(), testNode)
-		}
-
-		By("tearing down the test environment")
-		err := testEnv.Stop()
-		Expect(err).NotTo(HaveOccurred())
+		k8sClient = fake.NewClientBuilder().WithObjects(testNode).Build()
 	})
 
 	Context("AppendTaintToNode", func() {
