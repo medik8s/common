@@ -5,7 +5,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
 )
 
@@ -95,15 +94,6 @@ var _ = Describe("Taint utilities", func() {
 			Expect(taint.Key).To(Equal(corev1.TaintNodeOutOfService))
 			Expect(taint.Value).To(Equal("nodeshutdown"))
 			Expect(taint.Effect).To(Equal(corev1.TaintEffectNoExecute))
-			Expect(taint.TimeAdded).NotTo(BeNil())
-		})
-
-		It("should set TimeAdded to current time", func() {
-			before := metav1.Now()
-			taint := CreateOutOfServiceTaint()
-			after := metav1.Now()
-			Expect(taint.TimeAdded.Time).To(BeTemporally(">=", before.Time))
-			Expect(taint.TimeAdded.Time).To(BeTemporally("<=", after.Time))
 		})
 	})
 

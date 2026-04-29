@@ -9,7 +9,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/kubernetes"
@@ -64,14 +63,13 @@ func FilterOutTaint(taints []corev1.Taint, taintToDelete *corev1.Taint) ([]corev
 	return newTaints, deleted
 }
 
-// CreateOutOfServiceTaint returns an OutOfService taint
+// CreateOutOfServiceTaint returns an OutOfService taint.
+// TimeAdded is not set - caller should set it when applying the taint to ensure accurate timestamp.
 func CreateOutOfServiceTaint() corev1.Taint {
-	now := metav1.Now()
 	return corev1.Taint{
-		Key:       corev1.TaintNodeOutOfService,
-		Value:     "nodeshutdown",
-		Effect:    corev1.TaintEffectNoExecute,
-		TimeAdded: &now,
+		Key:    corev1.TaintNodeOutOfService,
+		Value:  "nodeshutdown",
+		Effect: corev1.TaintEffectNoExecute,
 	}
 }
 
