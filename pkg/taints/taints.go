@@ -74,7 +74,7 @@ func CreateOutOfServiceTaint() corev1.Taint {
 	}
 }
 
-// GetOutOfServiceTaintInfo returns the cached out-of-service taint information.
+// GetOutOfServiceTaintInfo returns the out-of-service taint information.
 // Must call InitOutOfServiceTaintFlagsWithRetry first to initialize.
 func GetOutOfServiceTaintInfo() OutOfServiceTaintInfo {
 	return taintInfo
