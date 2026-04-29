@@ -104,7 +104,7 @@ var _ = Describe("Taint utilities", func() {
 
 	Context("setOutOfTaintFlags", func() {
 		BeforeEach(func() {
-			taintInfo = OutOfServiceTaintInfo{}
+			OutOfServiceInfo = OutOfServiceTaintInfo{}
 		})
 
 		When("version is supported but not GA", func() {
@@ -112,8 +112,8 @@ var _ = Describe("Taint utilities", func() {
 				func(major, minor string) {
 					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(taintInfo.Supported).To(BeTrue())
-					Expect(taintInfo.GA).To(BeFalse())
+					Expect(OutOfServiceInfo.Supported).To(BeTrue())
+					Expect(OutOfServiceInfo.GA).To(BeFalse())
 				},
 				Entry("version 1.26", "1", "26"),
 				Entry("version 1.26+", "1", "26+"),
@@ -127,8 +127,8 @@ var _ = Describe("Taint utilities", func() {
 				func(major, minor string) {
 					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(taintInfo.Supported).To(BeTrue())
-					Expect(taintInfo.GA).To(BeTrue())
+					Expect(OutOfServiceInfo.Supported).To(BeTrue())
+					Expect(OutOfServiceInfo.GA).To(BeTrue())
 				},
 				Entry("version 1.28", "1", "28"),
 				Entry("version 1.28+", "1", "28+"),
@@ -141,8 +141,8 @@ var _ = Describe("Taint utilities", func() {
 				func(major, minor string) {
 					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(taintInfo.Supported).To(BeFalse())
-					Expect(taintInfo.GA).To(BeFalse())
+					Expect(OutOfServiceInfo.Supported).To(BeFalse())
+					Expect(OutOfServiceInfo.GA).To(BeFalse())
 				},
 				Entry("version 1.24", "1", "24"),
 				Entry("version 1.24+", "1", "24+"),
@@ -155,21 +155,12 @@ var _ = Describe("Taint utilities", func() {
 				func(major, minor string) {
 					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
 					Expect(err).To(HaveOccurred())
-					Expect(taintInfo.Supported).To(BeFalse())
-					Expect(taintInfo.GA).To(BeFalse())
+					Expect(OutOfServiceInfo.Supported).To(BeFalse())
+					Expect(OutOfServiceInfo.GA).To(BeFalse())
 				},
 				Entry("invalid minor version", "1", "%24"),
 				Entry("invalid major version", "1+", "26"),
 			)
-		})
-	})
-
-	Context("GetOutOfServiceTaintInfo", func() {
-		It("should return the taint info", func() {
-			taintInfo = OutOfServiceTaintInfo{Supported: true, GA: false}
-			info := GetOutOfServiceTaintInfo()
-			Expect(info.Supported).To(BeTrue())
-			Expect(info.GA).To(BeFalse())
 		})
 	})
 })

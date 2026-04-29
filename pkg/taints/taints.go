@@ -37,7 +37,7 @@ var (
 	loggerTaint   = ctrl.Log.WithName("taints")
 	leadingDigits = regexp.MustCompile(`^(\d+)`)
 
-	taintInfo OutOfServiceTaintInfo
+	OutOfServiceInfo OutOfServiceTaintInfo
 )
 
 // TaintExists checks if the given taint exists in list of taints. Returns true if exists false otherwise.
@@ -111,12 +111,6 @@ func RemoveTaintFromNode(ctx context.Context, c client.Client, node *corev1.Node
 	return true, nil
 }
 
-// GetOutOfServiceTaintInfo returns the out-of-service taint information.
-// Must call InitOutOfServiceTaintFlagsWithRetry first to initialize.
-func GetOutOfServiceTaintInfo() OutOfServiceTaintInfo {
-	return taintInfo
-}
-
 // InitOutOfServiceTaintFlagsWithRetry tries to initialize the OutOfService taint info based on k8s version, in case it fails (potentially due to network issues) it will retry for a limited time period.
 func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Config) error {
 	var err error
@@ -173,9 +167,9 @@ func setOutOfTaintFlags(version *version.Info) error {
 		return err
 	}
 
-	taintInfo.Supported = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionSupportingOutOfServiceTaint)
-	loggerTaint.Info("out of service taint strategy", "isSupported", taintInfo.Supported, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
-	taintInfo.GA = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionGAOutOfServiceTaint)
-	loggerTaint.Info("out of service taint strategy", "isGA", taintInfo.GA, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
+	OutOfServiceInfo.Supported = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionSupportingOutOfServiceTaint)
+	loggerTaint.Info("out of service taint strategy", "isSupported", OutOfServiceInfo.Supported, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
+	OutOfServiceInfo.GA = majorVer > minK8sMajorVersionOutOfServiceTaint || (majorVer == minK8sMajorVersionOutOfServiceTaint && minorVer >= minK8sMinorVersionGAOutOfServiceTaint)
+	loggerTaint.Info("out of service taint strategy", "isGA", OutOfServiceInfo.GA, "k8sMajorVersion", majorVer, "k8sMinorVersion", minorVer)
 	return nil
 }
