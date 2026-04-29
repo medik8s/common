@@ -173,6 +173,39 @@ var _ = Describe("Node taint operations integration", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeFalse())
 		})
+
+		It("should preserve existing taints when adding a new taint", func() {
+			ctx := context.Background()
+			existingTaint := corev1.Taint{
+				Key:    "existing-taint",
+				Effect: corev1.TaintEffectNoExecute,
+				Value:  "existing-value",
+			}
+			newTaint := corev1.Taint{
+				Key:    "new-taint",
+				Effect: corev1.TaintEffectNoSchedule,
+				Value:  "new-value",
+			}
+
+			// Add first taint
+			added, err := AppendTaintToNode(ctx, k8sClient, testNode, existingTaint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Get updated node
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
+
+			// Add second taint
+			added, err = AppendTaintToNode(ctx, k8sClient, testNode, newTaint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Verify both taints exist
+			updatedNode := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
+			Expect(TaintExists(updatedNode.Spec.Taints, &existingTaint)).To(BeTrue())
+			Expect(TaintExists(updatedNode.Spec.Taints, &newTaint)).To(BeTrue())
+		})
 	})
 
 	Context("RemoveTaintFromNode", func() {
@@ -212,6 +245,45 @@ var _ = Describe("Node taint operations integration", func() {
 			removed, err := RemoveTaintFromNode(ctx, k8sClient, testNode, taint)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(removed).To(BeFalse())
+		})
+
+		It("should only remove the specified taint and preserve others", func() {
+			ctx := context.Background()
+			taint1 := corev1.Taint{
+				Key:    "taint-to-keep",
+				Effect: corev1.TaintEffectNoExecute,
+				Value:  "keep-value",
+			}
+			taint2 := corev1.Taint{
+				Key:    "taint-to-remove",
+				Effect: corev1.TaintEffectNoSchedule,
+				Value:  "remove-value",
+			}
+
+			// Add both taints
+			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
+
+			added, err = AppendTaintToNode(ctx, k8sClient, testNode, taint2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Get updated node
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
+
+			// Remove only taint2
+			removed, err := RemoveTaintFromNode(ctx, k8sClient, testNode, taint2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(removed).To(BeTrue())
+
+			// Verify taint1 still exists but taint2 is gone
+			updatedNode := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
+			Expect(TaintExists(updatedNode.Spec.Taints, &taint1)).To(BeTrue())
+			Expect(TaintExists(updatedNode.Spec.Taints, &taint2)).To(BeFalse())
 		})
 	})
 })
