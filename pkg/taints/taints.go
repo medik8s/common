@@ -9,11 +9,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -71,6 +73,42 @@ func CreateOutOfServiceTaint() corev1.Taint {
 		Value:  "nodeshutdown",
 		Effect: corev1.TaintEffectNoExecute,
 	}
+}
+
+// AppendTaintToNode adds the given taint to the node and patches it.
+// Returns true if the taint was added, false if it already existed.
+// Sets TimeAdded to the current time when adding the taint.
+func AppendTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
+	if TaintExists(node.Spec.Taints, &taint) {
+		return false, nil
+	}
+
+	patch := client.MergeFrom(node.DeepCopy())
+	now := metav1.Now()
+	taint.TimeAdded = &now
+	node.Spec.Taints = append(node.Spec.Taints, taint)
+
+	if err := c.Patch(ctx, node, patch); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RemoveTaintFromNode removes the given taint from the node and patches it.
+// Returns true if the taint was removed, false if it didn't exist.
+func RemoveTaintFromNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
+	newTaints, removed := FilterOutTaint(node.Spec.Taints, &taint)
+	if !removed {
+		return false, nil
+	}
+
+	patch := client.MergeFrom(node.DeepCopy())
+	node.Spec.Taints = newTaints
+
+	if err := c.Patch(ctx, node, patch); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetOutOfServiceTaintInfo returns the out-of-service taint information.

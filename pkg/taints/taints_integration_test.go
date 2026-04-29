@@ -7,7 +7,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
@@ -74,6 +77,141 @@ var _ = Describe("InitOutOfServiceTaintFlagsWithRetry integration", func() {
 
 			err := InitOutOfServiceTaintFlagsWithRetry(ctx, invalidCfg)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+})
+
+var _ = Describe("Node taint operations integration", func() {
+	var testEnv *envtest.Environment
+	var cfg *rest.Config
+	var k8sClient client.Client
+	var testNode *corev1.Node
+
+	BeforeEach(func() {
+		By("bootstrapping test environment")
+		testEnv = &envtest.Environment{
+			CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+			ErrorIfCRDPathMissing: false,
+		}
+
+		var err error
+		cfg, err = testEnv.Start()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+
+		k8sClient, err = client.New(cfg, client.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient).NotTo(BeNil())
+
+		// Create a test node
+		testNode = &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node",
+			},
+		}
+		Expect(k8sClient.Create(context.Background(), testNode)).To(Succeed())
+	})
+
+	AfterEach(func() {
+		By("cleaning up test node")
+		if testNode != nil {
+			_ = k8sClient.Delete(context.Background(), testNode)
+		}
+
+		By("tearing down the test environment")
+		err := testEnv.Stop()
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	Context("AppendTaintToNode", func() {
+		It("should add taint to node and patch it", func() {
+			ctx := context.Background()
+			taint := corev1.Taint{
+				Key:    "test-key",
+				Effect: corev1.TaintEffectNoSchedule,
+				Value:  "test-value",
+			}
+
+			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Verify taint was added
+			updatedNode := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
+			Expect(TaintExists(updatedNode.Spec.Taints, &taint)).To(BeTrue())
+
+			// Verify TimeAdded was set
+			var foundTaint *corev1.Taint
+			for i := range updatedNode.Spec.Taints {
+				if updatedNode.Spec.Taints[i].MatchTaint(&taint) {
+					foundTaint = &updatedNode.Spec.Taints[i]
+					break
+				}
+			}
+			Expect(foundTaint).NotTo(BeNil())
+			Expect(foundTaint.TimeAdded).NotTo(BeNil())
+		})
+
+		It("should return false if taint already exists", func() {
+			ctx := context.Background()
+			taint := corev1.Taint{
+				Key:    "existing-key",
+				Effect: corev1.TaintEffectNoExecute,
+			}
+
+			// Add taint first time
+			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Get updated node
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
+
+			// Try to add same taint again
+			added, err = AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeFalse())
+		})
+	})
+
+	Context("RemoveTaintFromNode", func() {
+		It("should remove taint from node and patch it", func() {
+			ctx := context.Background()
+			taint := corev1.Taint{
+				Key:    "remove-key",
+				Effect: corev1.TaintEffectNoSchedule,
+			}
+
+			// Add taint first
+			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(added).To(BeTrue())
+
+			// Get updated node
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
+
+			// Remove the taint
+			removed, err := RemoveTaintFromNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(removed).To(BeTrue())
+
+			// Verify taint was removed
+			updatedNode := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
+			Expect(TaintExists(updatedNode.Spec.Taints, &taint)).To(BeFalse())
+		})
+
+		It("should return false if taint doesn't exist", func() {
+			ctx := context.Background()
+			taint := corev1.Taint{
+				Key:    "nonexistent-key",
+				Effect: corev1.TaintEffectNoExecute,
+			}
+
+			removed, err := RemoveTaintFromNode(ctx, k8sClient, testNode, taint)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(removed).To(BeFalse())
 		})
 	})
 })
