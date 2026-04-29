@@ -55,12 +55,12 @@ func TaintExists(taints []corev1.Taint, taintToFind *corev1.Taint) bool {
 func FilterOutTaint(taints []corev1.Taint, taintToDelete *corev1.Taint) ([]corev1.Taint, bool) {
 	var newTaints []corev1.Taint
 	deleted := false
-	for i := range taints {
-		if taintToDelete.MatchTaint(&taints[i]) {
+	for _, taint := range taints {
+		if taint.MatchTaint(taintToDelete) {
 			deleted = true
 			continue
 		}
-		newTaints = append(newTaints, taints[i])
+		newTaints = append(newTaints, taint)
 	}
 	return newTaints, deleted
 }
