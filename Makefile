@@ -37,7 +37,7 @@ build: ## Build.
 	go build ./...
 
 .PHONY: test
-test: ## Run tests.
+test: ## Run unit tests.
 	go test ./... -coverprofile cover.out -v
 
 .PHONY: lint
@@ -63,8 +63,7 @@ verify-no-changes: ## verify there are no un-staged changes
 tidy: ## Runs go mod tidy
 	go mod tidy
 
-LOCALBIN ?= $(shell pwd)/bin
-SORT_IMPORTS = $(LOCALBIN)/sort-imports
+SORT_IMPORTS = $(shell pwd)/bin/sort-imports
 .PHONY: sort-imports
 sort-imports: ## Download sort-imports locally if necessary.
 	$(call go-install-tool,$(SORT_IMPORTS),github.com/slintes/sort-imports@$(SORT_IMPORTS_VERSION))
@@ -77,7 +76,7 @@ test-imports: sort-imports ## Check for sorted imports
 fix-imports: sort-imports ## Sort imports
 	$(SORT_IMPORTS) -w .
 
-GOIMPORTS = $(LOCALBIN)/goimports
+GOIMPORTS = $(shell pwd)/bin/goimports
 .PHONY: install-goimports
 install-goimports: ## updates goimports.
 	$(call go-install-tool,$(GOIMPORTS),golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION))
