@@ -2,6 +2,7 @@ package taints
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -86,14 +87,19 @@ func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Confi
 	interval := 2 * time.Second // retry every 2 seconds
 	timeout := 10 * time.Second // for a period of 10 seconds
 
-	// Since the last internal error returned by InitOutOfServiceTaintFlags also indicates whether polling succeed or not, there is no need to also keep the context error returned by PollUntilContextTimeout.
 	// Using wait.PollUntilContextTimeout to retry initOutOfServiceTaintFlags in case there is a temporary network issue.
-	_ = wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (bool, error) {
+	pollErr := wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (bool, error) {
 		if err = initOutOfServiceTaintFlags(config); err != nil {
 			return false, nil // Keep retrying
 		}
 		return true, nil // Success
 	})
+
+	// Respect context cancellation - return poll error so caller knows operation was cancelled
+	if pollErr != nil && (errors.Is(pollErr, context.Canceled) || errors.Is(pollErr, context.DeadlineExceeded)) {
+		return pollErr
+	}
+	// Return internal error: nil on success, or last failure on timeout (more specific than generic timeout)
 	return err
 }
 
