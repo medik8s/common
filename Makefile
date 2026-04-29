@@ -5,6 +5,9 @@ SHELL := /bin/bash
 GO_VERSION = 1.20
 GOIMPORTS_VERSION = v0.11.0
 SORT_IMPORTS_VERSION = v0.2.1
+ENVTEST_VERSION ?= v0.0.0-20260120065648-aebc15d7c689
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.33
 
 # Run go in a container
 # --rm                                                          = remove container when stopped
@@ -37,7 +40,8 @@ build: ## Build.
 	go build ./...
 
 .PHONY: test
-test: ## Run unit tests.
+test: envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s/$(ENVTEST_K8S_VERSION) -p path)" \
 	go test ./... -coverprofile cover.out -v
 
 .PHONY: lint
@@ -63,10 +67,16 @@ verify-no-changes: ## verify there are no un-staged changes
 tidy: ## Runs go mod tidy
 	go mod tidy
 
-SORT_IMPORTS = $(shell pwd)/bin/sort-imports
+LOCALBIN ?= $(shell pwd)/bin
+SORT_IMPORTS = $(LOCALBIN)/sort-imports
 .PHONY: sort-imports
 sort-imports: ## Download sort-imports locally if necessary.
 	$(call go-install-tool,$(SORT_IMPORTS),github.com/slintes/sort-imports@$(SORT_IMPORTS_VERSION))
+
+ENVTEST = $(LOCALBIN)/setup-envtest
+.PHONY: envtest
+envtest: ## Download envtest-setup locally if necessary.
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION))
 
 .PHONY: test-imports
 test-imports: sort-imports ## Check for sorted imports
@@ -76,7 +86,7 @@ test-imports: sort-imports ## Check for sorted imports
 fix-imports: sort-imports ## Sort imports
 	$(SORT_IMPORTS) -w .
 
-GOIMPORTS = $(shell pwd)/bin/goimports
+GOIMPORTS = $(LOCALBIN)/goimports
 .PHONY: install-goimports
 install-goimports: ## updates goimports.
 	$(call go-install-tool,$(GOIMPORTS),golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION))
