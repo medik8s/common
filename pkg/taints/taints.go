@@ -98,21 +98,25 @@ func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Confi
 }
 
 func initOutOfServiceTaintFlags(config *rest.Config) error {
-	if cs, err := kubernetes.NewForConfig(config); err != nil || cs == nil {
-		if cs == nil {
+	cs, err := kubernetes.NewForConfig(config)
+	if err != nil || cs == nil {
+		if err == nil {
 			err = fmt.Errorf("k8s client set is nil")
 		}
 		loggerTaint.Error(err, "couldn't retrieve k8s client")
 		return err
-	} else if k8sVersion, err := cs.Discovery().ServerVersion(); err != nil || k8sVersion == nil {
-		if k8sVersion == nil {
+	}
+
+	k8sVersion, err := cs.Discovery().ServerVersion()
+	if err != nil || k8sVersion == nil {
+		if err == nil {
 			err = fmt.Errorf("k8s server version is nil")
 		}
 		loggerTaint.Error(err, "couldn't retrieve k8s server version")
 		return err
-	} else {
-		return setOutOfTaintFlags(k8sVersion)
 	}
+
+	return setOutOfTaintFlags(k8sVersion)
 }
 
 func setOutOfTaintFlags(version *version.Info) error {
