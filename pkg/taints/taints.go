@@ -117,7 +117,7 @@ func GetOutOfServiceTaintInfo() OutOfServiceTaintInfo {
 	return taintInfo
 }
 
-// InitOutOfServiceTaintFlagsWithRetry tries to initialize the OutOfService taint info based on k8s version, in case it fails (potentially due to network issues) it will retry for a limited number of times.
+// InitOutOfServiceTaintFlagsWithRetry tries to initialize the OutOfService taint info based on k8s version, in case it fails (potentially due to network issues) it will retry for a limited time period.
 func InitOutOfServiceTaintFlagsWithRetry(ctx context.Context, config *rest.Config) error {
 	var err error
 	interval := 2 * time.Second // retry every 2 seconds
