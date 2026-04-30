@@ -83,7 +83,7 @@ func AddTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, tai
 		return false, nil
 	}
 
-	patch := client.MergeFrom(node.DeepCopy())
+	patch := client.StrategicMergeFrom(node.DeepCopy())
 	now := metav1.Now()
 	taint.TimeAdded = &now
 	node.Spec.Taints = append(node.Spec.Taints, taint)
@@ -102,7 +102,7 @@ func RemoveTaintFromNode(ctx context.Context, c client.Client, node *corev1.Node
 		return false, nil
 	}
 
-	patch := client.MergeFrom(node.DeepCopy())
+	patch := client.StrategicMergeFrom(node.DeepCopy())
 	node.Spec.Taints = newTaints
 
 	if err := c.Patch(ctx, node, patch); err != nil {
