@@ -42,17 +42,17 @@ var _ = Describe("Taint utilities", func() {
 		})
 	})
 
-	Context("FilterOutTaint", func() {
+	Context("Filter", func() {
 		taint1 := corev1.Taint{Key: "key1", Effect: corev1.TaintEffectNoSchedule, Value: "value1"}
 		taint2 := corev1.Taint{Key: "key2", Effect: corev1.TaintEffectNoExecute, Value: "value2"}
 		taint3 := corev1.Taint{Key: "key3", Effect: corev1.TaintEffectPreferNoSchedule, Value: "value3"}
-		taintToRemove := corev1.Taint{Key: "key2", Effect: corev1.TaintEffectNoExecute}
+		taint := corev1.Taint{Key: "key2", Effect: corev1.TaintEffectNoExecute}
 
 		When("taint to filter exists", func() {
 			It("should return filtered list and true", func() {
 				taints := []corev1.Taint{taint1, taint2, taint3}
-				newTaints, deleted := FilterOutTaint(taints, &taintToRemove)
-				Expect(deleted).To(BeTrue())
+				newTaints, removed := Filter(taints, &taint)
+				Expect(removed).To(BeTrue())
 				Expect(newTaints).To(HaveLen(2))
 				Expect(newTaints).To(ContainElement(taint1))
 				Expect(newTaints).To(ContainElement(taint3))
@@ -63,8 +63,8 @@ var _ = Describe("Taint utilities", func() {
 		When("taint to filter does not exist", func() {
 			It("should return original list and false", func() {
 				taints := []corev1.Taint{taint1, taint3}
-				newTaints, deleted := FilterOutTaint(taints, &taintToRemove)
-				Expect(deleted).To(BeFalse())
+				newTaints, removed := Filter(taints, &taint)
+				Expect(removed).To(BeFalse())
 				Expect(newTaints).To(HaveLen(2))
 				Expect(newTaints).To(ContainElement(taint1))
 				Expect(newTaints).To(ContainElement(taint3))
@@ -75,8 +75,8 @@ var _ = Describe("Taint utilities", func() {
 			It("should remove all matching taints", func() {
 				duplicate := corev1.Taint{Key: "key2", Effect: corev1.TaintEffectNoExecute, Value: "different"}
 				taints := []corev1.Taint{taint1, taint2, duplicate, taint3}
-				newTaints, deleted := FilterOutTaint(taints, &taintToRemove)
-				Expect(deleted).To(BeTrue())
+				newTaints, removed := Filter(taints, &taint)
+				Expect(removed).To(BeTrue())
 				Expect(newTaints).To(HaveLen(2))
 				Expect(newTaints).To(ContainElement(taint1))
 				Expect(newTaints).To(ContainElement(taint3))
@@ -86,8 +86,8 @@ var _ = Describe("Taint utilities", func() {
 		When("list is empty", func() {
 			It("should return empty list and false", func() {
 				taints := []corev1.Taint{}
-				newTaints, deleted := FilterOutTaint(taints, &taintToRemove)
-				Expect(deleted).To(BeFalse())
+				newTaints, removed := Filter(taints, &taint)
+				Expect(removed).To(BeFalse())
 				Expect(newTaints).To(BeEmpty())
 			})
 		})

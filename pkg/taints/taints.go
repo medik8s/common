@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -50,19 +51,18 @@ func TaintExists(taints []corev1.Taint, taintToFind *corev1.Taint) bool {
 	return false
 }
 
-// FilterOutTaint returns a new taint slice without taints matching the given taintToDelete by key and effect.
-// Also returns true if any taints were filtered out, false otherwise.
-func FilterOutTaint(taints []corev1.Taint, taintToDelete *corev1.Taint) ([]corev1.Taint, bool) {
-	var newTaints []corev1.Taint
-	deleted := false
-	for _, taint := range taints {
-		if taint.MatchTaint(taintToDelete) {
-			deleted = true
-			continue
-		}
-		newTaints = append(newTaints, taint)
-	}
-	return newTaints, deleted
+// Filter removes a taint from the taints slice.
+// Since a taint's identity in Kubernetes is uniquely defined by its key and effect,
+// this function filters out the unique instance of such a taint matching those fields.
+// It returns the updated slice and a boolean indicating if the taint was found and removed.
+func Filter(taints []corev1.Taint, taint *corev1.Taint) ([]corev1.Taint, bool) {
+	originalLen := len(taints)
+
+	newTaints := slices.DeleteFunc(taints, func(t corev1.Taint) bool {
+		return t.MatchTaint(taint)
+	})
+
+	return newTaints, len(newTaints) < originalLen
 }
 
 // CreateOutOfServiceTaint returns an OutOfService taint.
@@ -97,7 +97,7 @@ func AppendTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, 
 // RemoveTaintFromNode removes the given taint from the node and patches it.
 // Returns true if the taint was removed, false if it didn't exist.
 func RemoveTaintFromNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
-	newTaints, removed := FilterOutTaint(node.Spec.Taints, &taint)
+	newTaints, removed := Filter(node.Spec.Taints, &taint)
 	if !removed {
 		return false, nil
 	}
