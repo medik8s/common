@@ -180,7 +180,7 @@ var _ = Describe("Node taint operations", func() {
 		k8sClient = fake.NewClientBuilder().WithObjects(testNode).Build()
 	})
 
-	Context("AppendTaintToNode", func() {
+	Context("AddTaintToNode", func() {
 		It("should add taint to node and patch it", func() {
 			ctx := context.Background()
 			taint := corev1.Taint{
@@ -189,7 +189,7 @@ var _ = Describe("Node taint operations", func() {
 				Value:  "test-value",
 			}
 
-			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			added, err := AddTaintToNode(ctx, k8sClient, testNode, taint)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeTrue())
 
@@ -218,7 +218,7 @@ var _ = Describe("Node taint operations", func() {
 			}
 
 			// Add taint first time
-			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			added, err := AddTaintToNode(ctx, k8sClient, testNode, taint)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeTrue())
 
@@ -226,7 +226,7 @@ var _ = Describe("Node taint operations", func() {
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
 
 			// Try to add same taint again
-			added, err = AppendTaintToNode(ctx, k8sClient, testNode, taint)
+			added, err = AddTaintToNode(ctx, k8sClient, testNode, taint)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeFalse())
 		})
@@ -259,13 +259,13 @@ var _ = Describe("Node taint operations", func() {
 			}
 
 			// Add both taints
-			added, err := AppendTaintToNode(ctx, k8sClient, testNode, taint1)
+			added, err := AddTaintToNode(ctx, k8sClient, testNode, taint1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeTrue())
 
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), testNode)).To(Succeed())
 
-			added, err = AppendTaintToNode(ctx, k8sClient, testNode, taint2)
+			added, err = AddTaintToNode(ctx, k8sClient, testNode, taint2)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(added).To(BeTrue())
 

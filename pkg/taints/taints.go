@@ -75,10 +75,10 @@ func CreateOutOfServiceTaint() corev1.Taint {
 	}
 }
 
-// AppendTaintToNode adds the given taint to the node and patches it.
+// AddTaintToNode adds the given taint to the node and patches it.
 // Returns true if the taint was added, false if it already existed.
 // Sets TimeAdded to the current time when adding the taint.
-func AppendTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
+func AddTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
 	if TaintExists(node.Spec.Taints, &taint) {
 		return false, nil
 	}
