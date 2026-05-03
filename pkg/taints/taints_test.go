@@ -102,18 +102,14 @@ var _ = Describe("Taint utilities", func() {
 		})
 	})
 
-	Context("setOutOfTaintFlags", func() {
-		BeforeEach(func() {
-			OutOfServiceInfo = OutOfServiceTaintInfo{}
-		})
-
+	Context("getOutOfServiceTaintInfo", func() {
 		When("version is supported but not GA", func() {
-			DescribeTable("should set Supported=true, GA=false",
+			DescribeTable("should return Supported=true, GA=false",
 				func(major, minor string) {
-					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
+					info, err := getOutOfServiceTaintInfo(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(OutOfServiceInfo.Supported).To(BeTrue())
-					Expect(OutOfServiceInfo.GA).To(BeFalse())
+					Expect(info.Supported).To(BeTrue())
+					Expect(info.GA).To(BeFalse())
 				},
 				Entry("version 1.26", "1", "26"),
 				Entry("version 1.26+", "1", "26+"),
@@ -123,12 +119,12 @@ var _ = Describe("Taint utilities", func() {
 		})
 
 		When("version is GA", func() {
-			DescribeTable("should set Supported=true, GA=true",
+			DescribeTable("should return Supported=true, GA=true",
 				func(major, minor string) {
-					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
+					info, err := getOutOfServiceTaintInfo(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(OutOfServiceInfo.Supported).To(BeTrue())
-					Expect(OutOfServiceInfo.GA).To(BeTrue())
+					Expect(info.Supported).To(BeTrue())
+					Expect(info.GA).To(BeTrue())
 				},
 				Entry("version 1.28", "1", "28"),
 				Entry("version 1.28+", "1", "28+"),
@@ -137,12 +133,12 @@ var _ = Describe("Taint utilities", func() {
 		})
 
 		When("version is not supported", func() {
-			DescribeTable("should set Supported=false, GA=false",
+			DescribeTable("should return Supported=false, GA=false",
 				func(major, minor string) {
-					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
+					info, err := getOutOfServiceTaintInfo(&version.Info{Major: major, Minor: minor})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(OutOfServiceInfo.Supported).To(BeFalse())
-					Expect(OutOfServiceInfo.GA).To(BeFalse())
+					Expect(info.Supported).To(BeFalse())
+					Expect(info.GA).To(BeFalse())
 				},
 				Entry("version 1.24", "1", "24"),
 				Entry("version 1.24+", "1", "24+"),
@@ -153,10 +149,8 @@ var _ = Describe("Taint utilities", func() {
 		When("version format is invalid", func() {
 			DescribeTable("should return error",
 				func(major, minor string) {
-					err := setOutOfTaintFlags(&version.Info{Major: major, Minor: minor})
+					_, err := getOutOfServiceTaintInfo(&version.Info{Major: major, Minor: minor})
 					Expect(err).To(HaveOccurred())
-					Expect(OutOfServiceInfo.Supported).To(BeFalse())
-					Expect(OutOfServiceInfo.GA).To(BeFalse())
 				},
 				Entry("invalid minor version", "1", "%24"),
 				Entry("invalid major version", "1+", "26"),
