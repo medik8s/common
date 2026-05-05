@@ -14,7 +14,7 @@ import (
 )
 
 var _ = Describe("Taint utilities", func() {
-	Context("TaintExists", func() {
+	Context("Contains", func() {
 		taint1 := corev1.Taint{Key: "key1", Effect: corev1.TaintEffectNoSchedule}
 		taint2 := corev1.Taint{Key: "key2", Effect: corev1.TaintEffectNoExecute}
 		taint3 := corev1.Taint{Key: "key3", Effect: corev1.TaintEffectPreferNoSchedule}
@@ -22,22 +22,22 @@ var _ = Describe("Taint utilities", func() {
 		When("taint exists in list", func() {
 			It("should return true", func() {
 				taints := []corev1.Taint{taint1, taint2}
-				Expect(TaintExists(taints, &taint1)).To(BeTrue())
-				Expect(TaintExists(taints, &taint2)).To(BeTrue())
+				Expect(Contains(taints, &taint1)).To(BeTrue())
+				Expect(Contains(taints, &taint2)).To(BeTrue())
 			})
 		})
 
 		When("taint does not exist in list", func() {
 			It("should return false", func() {
 				taints := []corev1.Taint{taint1, taint2}
-				Expect(TaintExists(taints, &taint3)).To(BeFalse())
+				Expect(Contains(taints, &taint3)).To(BeFalse())
 			})
 		})
 
 		When("list is empty", func() {
 			It("should return false", func() {
 				taints := []corev1.Taint{}
-				Expect(TaintExists(taints, &taint1)).To(BeFalse())
+				Expect(Contains(taints, &taint1)).To(BeFalse())
 			})
 		})
 	})
@@ -190,7 +190,7 @@ var _ = Describe("Node taint operations", func() {
 			// Verify taint was added
 			updatedNode := &corev1.Node{}
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
-			Expect(TaintExists(updatedNode.Spec.Taints, &taint)).To(BeTrue())
+			Expect(Contains(updatedNode.Spec.Taints, &taint)).To(BeTrue())
 
 			// Verify TimeAdded was set
 			var foundTaint *corev1.Taint
@@ -274,8 +274,8 @@ var _ = Describe("Node taint operations", func() {
 			// Verify taint1 still exists but taint2 is gone
 			updatedNode := &corev1.Node{}
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testNode), updatedNode)).To(Succeed())
-			Expect(TaintExists(updatedNode.Spec.Taints, &taint1)).To(BeTrue())
-			Expect(TaintExists(updatedNode.Spec.Taints, &taint2)).To(BeFalse())
+			Expect(Contains(updatedNode.Spec.Taints, &taint1)).To(BeTrue())
+			Expect(Contains(updatedNode.Spec.Taints, &taint2)).To(BeFalse())
 		})
 	})
 })

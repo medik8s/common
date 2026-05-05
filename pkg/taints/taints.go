@@ -39,14 +39,11 @@ var (
 	leadingDigits = regexp.MustCompile(`^(\d+)`)
 )
 
-// TaintExists checks if the given taint exists in list of taints. Returns true if exists false otherwise.
-func TaintExists(taints []corev1.Taint, taintToFind *corev1.Taint) bool {
-	for _, taint := range taints {
-		if taint.MatchTaint(taintToFind) {
-			return true
-		}
-	}
-	return false
+// Contains checks if the given taint exists in list of taints. Returns true if exists false otherwise.
+func Contains(taints []corev1.Taint, taint *corev1.Taint) bool {
+	return slices.ContainsFunc(taints, func(t corev1.Taint) bool {
+		return t.MatchTaint(taint)
+	})
 }
 
 // Filter removes a taint from the taints slice.
@@ -77,7 +74,7 @@ func CreateOutOfServiceTaint() corev1.Taint {
 // Returns true if the taint was added, false if it already existed.
 // Sets TimeAdded to the current time when adding the taint.
 func AddTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
-	if TaintExists(node.Spec.Taints, &taint) {
+	if Contains(node.Spec.Taints, &taint) {
 		return false, nil
 	}
 
