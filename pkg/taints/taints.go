@@ -46,11 +46,11 @@ func Contains(taints []corev1.Taint, taint *corev1.Taint) bool {
 	})
 }
 
-// Filter removes a taint from the taints slice.
+// FilterOut removes a taint from the taints slice.
 // Since a taint's identity in Kubernetes is uniquely defined by its key and effect,
 // this function filters out the unique instance of such a taint matching those fields.
 // It returns the updated slice and a boolean indicating if the taint was found and removed.
-func Filter(taints []corev1.Taint, taint *corev1.Taint) ([]corev1.Taint, bool) {
+func FilterOut(taints []corev1.Taint, taint *corev1.Taint) ([]corev1.Taint, bool) {
 	originalLen := len(taints)
 
 	newTaints := slices.DeleteFunc(taints, func(t corev1.Taint) bool {
@@ -92,7 +92,7 @@ func AddTaintToNode(ctx context.Context, c client.Client, node *corev1.Node, tai
 // RemoveTaintFromNode removes the given taint from the node and patches it.
 // Returns true if the taint was removed, false if it didn't exist.
 func RemoveTaintFromNode(ctx context.Context, c client.Client, node *corev1.Node, taint corev1.Taint) (bool, error) {
-	newTaints, removed := Filter(node.Spec.Taints, &taint)
+	newTaints, removed := FilterOut(node.Spec.Taints, &taint)
 	if !removed {
 		return false, nil
 	}
