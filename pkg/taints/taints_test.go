@@ -53,10 +53,7 @@ var _ = Describe("Taint utilities", func() {
 				taints := []corev1.Taint{taint1, taint2, taint3}
 				newTaints, removed := FilterOut(taints, &taint)
 				Expect(removed).To(BeTrue())
-				Expect(newTaints).To(HaveLen(2))
-				Expect(newTaints).To(ContainElement(taint1))
-				Expect(newTaints).To(ContainElement(taint3))
-				Expect(newTaints).NotTo(ContainElement(taint2))
+				Expect(newTaints).To(ConsistOf(taint1, taint3))
 			})
 		})
 
@@ -65,9 +62,7 @@ var _ = Describe("Taint utilities", func() {
 				taints := []corev1.Taint{taint1, taint3}
 				newTaints, removed := FilterOut(taints, &taint)
 				Expect(removed).To(BeFalse())
-				Expect(newTaints).To(HaveLen(2))
-				Expect(newTaints).To(ContainElement(taint1))
-				Expect(newTaints).To(ContainElement(taint3))
+				Expect(newTaints).To(ConsistOf(taint1, taint3))
 			})
 		})
 
@@ -77,9 +72,7 @@ var _ = Describe("Taint utilities", func() {
 				taints := []corev1.Taint{taint1, taint2, duplicate, taint3}
 				newTaints, removed := FilterOut(taints, &taint)
 				Expect(removed).To(BeTrue())
-				Expect(newTaints).To(HaveLen(2))
-				Expect(newTaints).To(ContainElement(taint1))
-				Expect(newTaints).To(ContainElement(taint3))
+				Expect(newTaints).To(ConsistOf(taint1, taint3))
 			})
 		})
 
