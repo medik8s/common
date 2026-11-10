@@ -862,3 +862,71 @@ func mustInitialize(t *testing.T, s *nodestate.Store) {
 		t.Fatal(err)
 	}
 }
+
+// TestWriteContinuesTheRevisionSequenceFromDisk is the regression for a
+// revision that went backwards across a restart.
+//
+// WriteTo loaded the file and then discarded what it had loaded, computing
+// the next revision from the caller's hand-built document — whose Revision is
+// zero, the natural way to build one. A fresh process that loaded revision 3
+// and then deliberately wrote a new document restarted the sequence at 1, so
+// two different documents claimed the same revision and the ordering that
+// foreign-write detection and any post-hoc audit read was meaningless.
+func TestWriteContinuesTheRevisionSequenceFromDisk(t *testing.T) {
+	t.Parallel()
+
+	dir := tempStateDir(t)
+	ctx := context.Background()
+	first, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialize(t, first)
+	for i := 0; i < 2; i++ {
+		if _, err := first.Update(ctx, func(d *nodestate.Document) error {
+			d.Node = "worker-0"
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The journal is now at revision 3.
+
+	// A new Store stands in for a restarted process, which is where the
+	// sequence was lost: the predecessor's writes had seeded nothing.
+	successor, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := successor.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := nodestate.NewDocument(nodestate.ComponentSBR)
+	fresh.Node = "worker-1"
+	if err := successor.Write(ctx, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Revision != 4 {
+		t.Errorf("Write stamped revision %d, want 4: a deliberate replace must continue the sequence found on disk", fresh.Revision)
+	}
+
+	// What was stamped is what is on disk, and the next update continues it.
+	back, err := successor.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Revision != 4 {
+		t.Errorf("the file holds revision %d after Write, want 4", back.Revision)
+	}
+	doc, err := successor.Update(ctx, func(d *nodestate.Document) error {
+		d.Node = "worker-2"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Revision != 5 {
+		t.Errorf("Update after Write produced revision %d, want 5", doc.Revision)
+	}
+}

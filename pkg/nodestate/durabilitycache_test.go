@@ -217,3 +217,57 @@ func TestExistingDirectoryIsNotResynchronized(t *testing.T) {
 		t.Errorf("%d directory syncs for a directory that already existed; want 0", got)
 	}
 }
+
+// TestForeignBytesAtAConfirmedRevisionDoNotInheritTheConfirmation is the
+// regression for a durability cache that keyed on the revision alone.
+//
+// A revision is a per-writer sequence number, not a unique value across
+// writers. A contract-violating second writer — the DaemonSet surge case the
+// package explicitly tolerates rather than refuses — could replace the file
+// with different bytes stamped with a revision this Store happened to have
+// confirmed, and the next Load matched the cache, skipped the fsync, and
+// reported StatusOK for bytes no process had ever synchronized. StatusOK
+// means the synchronization succeeded; the cache now keys on the writer too.
+func TestForeignBytesAtAConfirmedRevisionDoNotInheritTheConfirmation(t *testing.T) {
+	t.Parallel()
+
+	rec := nodestatetest.NewRecordingFS(nodestate.OSFileSystem())
+	s, _ := newStore(t, nodestate.ComponentSBR, nodestate.WithFileSystem(rec))
+	ctx := context.Background()
+	initialize(t, s) // revision 1, written and synchronized by this process
+	rec.Reset()      // keep the write's own fsyncs out of the measurement
+
+	// A foreign process replaces the file with its own bytes at the same
+	// revision: the surge overlap in which both writers advance 0 -> 1.
+	foreign := `{"schemaVersion":1,"updatedAt":"2026-01-01T00:00:00Z","revision":1,` +
+		`"writerID":"some-boot/999/1577836800000000000",` +
+		`"agent":{"component":"sbr"},"reboots":[]}`
+	mustWrite(t, s.Path(s.Self()), foreign)
+
+	res, err := s.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !res.Status.Trusted() {
+		t.Fatalf("Status = %v; the foreign document is valid history", res.Status)
+	}
+	if !res.ForeignWrite {
+		t.Error("ForeignWrite = false; the replacement went unnoticed")
+	}
+	if got := rec.Count(nodestatetest.OpSyncFile); got == 0 {
+		t.Error("Load skipped the fsync for bytes another process wrote, because they carried a revision this Store had confirmed")
+	}
+
+	// The cache must still do its job for the foreign bytes once they have
+	// been confirmed: repeating the fsync on every Load is the cost the
+	// cache exists to avoid, on the storage this product runs on.
+	rec.Reset()
+	for i := 0; i < 3; i++ {
+		if _, err := s.Load(ctx); err != nil {
+			t.Fatalf("Load %d: %v", i, err)
+		}
+	}
+	if got := rec.Count(nodestatetest.OpSyncFile); got != 0 {
+		t.Errorf("%d file syncs across repeated Loads of confirmed foreign bytes; want 0", got)
+	}
+}

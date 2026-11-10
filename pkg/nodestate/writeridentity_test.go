@@ -2,10 +2,13 @@ package nodestate_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/medik8s/common/pkg/nodestate"
 )
@@ -191,5 +194,64 @@ func TestAnotherProcessIsStillDetected(t *testing.T) {
 	}
 	if !res.ForeignWrite {
 		t.Error("ForeignWrite = false; a genuinely different writer went unnoticed")
+	}
+}
+
+// TestRestartDoesNotPairThisPIDWithThePredecessorsStartTime is the regression
+// for an Agent identity that identified no real process.
+//
+// writeLocked always overwrote Agent.PID with this process's but kept a
+// loaded document's non-zero Agent.StartedAt, so after a restart every update
+// persisted a (PID, start time) pair describing a process that never existed
+// — exactly the pair types.go says exists to make a second live writer
+// recognisable. A caller supplying its own start time on a fresh document,
+// whose PID is unset, is still left alone.
+func TestRestartDoesNotPairThisPIDWithThePredecessorsStartTime(t *testing.T) {
+	t.Parallel()
+
+	dir := tempStateDir(t)
+	ctx := context.Background()
+
+	// A journal left behind by a predecessor: its own PID, started at a time
+	// of its own, at a revision of its own.
+	predecessorStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	raw := fmt.Sprintf(`{"schemaVersion":1,"updatedAt":%q,"revision":7,`+
+		`"writerID":"some-boot/4242/1577836800000000000",`+
+		`"agent":{"component":"sbr","pid":4242,"startedAt":%q},"reboots":[]}`,
+		predecessorStart.Format(time.RFC3339Nano), predecessorStart.Format(time.RFC3339Nano))
+	mustWrite(t, filepath.Join(dir, nodestate.SBRFile), raw)
+
+	s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.Update(ctx, func(d *nodestate.Document) error {
+		d.Node = "worker-0"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Agent.PID != os.Getpid() {
+		t.Errorf("Agent.PID = %d, want this process's %d", doc.Agent.PID, os.Getpid())
+	}
+	if doc.Agent.StartedAt.Equal(predecessorStart) {
+		t.Error("Agent.StartedAt kept the predecessor's value under this process's PID; the pair identifies no process that ever ran")
+	}
+	if doc.Agent.StartedAt.IsZero() {
+		t.Error("Agent.StartedAt was not stamped")
+	}
+
+	// What was stamped is what persists.
+	back, err := s.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Agent.PID != os.Getpid() || back.Agent.StartedAt.Equal(predecessorStart) {
+		t.Errorf("persisted identity = (%d, %v); want this process's PID with its own start time",
+			back.Agent.PID, back.Agent.StartedAt)
 	}
 }

@@ -217,13 +217,19 @@ type Store struct {
 	// wrote this file.
 	// The three fields below are per-Store rather than per-file, but every
 	// access to them happens under mu, so mu covers them too.
-	mu           *sync.Mutex
+	mu *sync.Mutex
+	// lastRevision is the highest revision this Store has written or read
+	// from disk. Seeding it from every trusted read is what lets a fresh
+	// process continue the sequence: a deliberate Write of a hand-built
+	// document carries no revision, and without the seed the sequence would
+	// restart and two different documents would claim the same revision.
 	lastRevision uint64
 	haveWritten  bool
 	swept        bool
 
-	// confirmedRevision is the revision this Store has established as
-	// crash-durable, and confirmedValid says whether it means anything yet.
+	// confirmedRevision and confirmedWriterID identify the bytes this Store
+	// has established as crash-durable, and confirmedValid says whether they
+	// mean anything yet.
 	//
 	// They exist to keep durability confirmation off the repeat path. A
 	// process cannot know whether its predecessor's last write survived, so
@@ -234,7 +240,14 @@ type Store struct {
 	// whose storage is failing. That is the state this product exists for,
 	// and §5.6 of the design asks for journal I/O to be bounded because of
 	// it.
+	//
+	// The writer is part of the identity because a revision is a per-writer
+	// sequence number, not a unique value across writers. A foreign process
+	// that replaced the file can leave different bytes stamped with a
+	// revision this Store happens to have confirmed, and a confirmation
+	// established for one writer's bytes must not transfer to another's.
 	confirmedRevision uint64
+	confirmedWriterID string
 	confirmedValid    bool
 }
 
@@ -689,18 +702,26 @@ func (s *Store) Load(ctx context.Context) (*LoadResult, error) {
 }
 
 // confirmLocked establishes that doc is crash-durable, skipping the work when
-// this Store has already established it for the same revision.
+// this Store has already established it for the same revision by the same
+// writer.
 //
 // Skipping is safe because there are only two ways the live file can reach a
-// revision this Store has confirmed: this process synchronized it here, or
-// this process wrote it through atomicReplace, which synchronizes the file
-// and the directory before returning success. A write that could not be
-// confirmed clears the mark, and so does any revision this Store has not
+// (revision, writer) pair this Store has confirmed: this process synchronized
+// it here, or this process wrote it through atomicReplace, which synchronizes
+// the file and the directory before returning success. A write that could not
+// be confirmed clears the mark, and so does any revision this Store has not
 // seen — including every revision left behind by a previous process.
+//
+// The writer is part of the key because a revision is a per-writer sequence
+// number, not a unique value across writers. A contract-violating second
+// writer can leave different bytes stamped with a revision this Store happens
+// to have confirmed, and a confirmation established for this process's bytes
+// must not transfer to bytes it never synchronized.
 //
 // The caller holds mu.
 func (s *Store) confirmLocked(doc *Document) error {
-	if s.confirmedValid && doc != nil && doc.Revision == s.confirmedRevision {
+	if s.confirmedValid && doc != nil &&
+		doc.Revision == s.confirmedRevision && doc.WriterID == s.confirmedWriterID {
 		return nil
 	}
 	if err := s.syncCurrent(); err != nil {
@@ -708,7 +729,7 @@ func (s *Store) confirmLocked(doc *Document) error {
 		return err
 	}
 	if doc != nil {
-		s.confirmedRevision, s.confirmedValid = doc.Revision, true
+		s.confirmedRevision, s.confirmedWriterID, s.confirmedValid = doc.Revision, doc.WriterID, true
 	}
 	return nil
 }
@@ -751,6 +772,13 @@ func (s *Store) loadLocked() (*LoadResult, error) {
 	case err == nil:
 		if err := s.checkPreserved(doc); err != nil {
 			return nil, err
+		}
+		// A fresh process continues the revision sequence from what it finds
+		// on disk. A deliberate Write of a hand-built document carries no
+		// revision of its own, and without this seed the sequence would
+		// restart at 1 while the file's history still speaks of higher ones.
+		if doc.Revision > s.lastRevision {
+			s.lastRevision = doc.Revision
 		}
 		return &LoadResult{Document: doc, Status: s.classify(doc), ForeignWrite: s.isForeign(doc)}, nil
 	case errors.Is(err, fs.ErrNotExist):
@@ -977,6 +1005,7 @@ func isAccessFault(err error) bool {
 		errors.Is(err, ErrInsecureOwner) ||
 		errors.Is(err, ErrSymlink) ||
 		errors.Is(err, ErrNotRegular) ||
+		errors.Is(err, ErrNotDirectory) ||
 		errors.Is(err, ErrTooLarge)
 }
 
@@ -1091,6 +1120,15 @@ func (s *Store) writeLocked(doc *Document) error {
 	}
 	doc.SchemaVersion = Schema
 	doc.Agent.Component = s.self
+	if doc.Agent.PID != 0 && doc.Agent.PID != identity.PID {
+		// The persisted (PID, StartedAt) pair identifies a process, and a
+		// document read back after a restart carries the predecessor's pair.
+		// Keeping the predecessor's start time under this process's PID
+		// would describe a process that never existed. A caller supplying
+		// its own start time does so on a document whose PID is unset, and
+		// is left alone.
+		doc.Agent.StartedAt = time.Time{}
+	}
 	doc.Agent.PID = identity.PID
 	if doc.Agent.StartedAt.IsZero() {
 		doc.Agent.StartedAt = identity.StartedAt
@@ -1135,7 +1173,7 @@ func (s *Store) writeLocked(doc *Document) error {
 	if err == nil {
 		// atomicReplace synchronized the file and the directory before
 		// returning, so these bytes are durable without another pass.
-		s.confirmedRevision, s.confirmedValid = doc.Revision, true
+		s.confirmedRevision, s.confirmedWriterID, s.confirmedValid = doc.Revision, doc.WriterID, true
 	} else {
 		s.confirmedValid = false
 	}
@@ -1143,9 +1181,12 @@ func (s *Store) writeLocked(doc *Document) error {
 }
 
 // nextRevision never lets the revision go backwards, including when the file
-// on disk has a higher one than this Store last wrote. That can only happen
-// after a foreign write, and continuing from the larger value keeps the
-// sequence meaningful to anyone reading the history afterwards.
+// on disk has a higher one than this Store last wrote. That happens after a
+// foreign write, and in a fresh process that loaded a predecessor's file —
+// loadLocked seeds lastRevision from every trusted read, so a deliberate
+// Write of a hand-built document continues the sequence rather than
+// restarting it. Continuing from the larger value keeps the sequence
+// meaningful to anyone reading the history afterwards.
 func (s *Store) nextRevision(onDisk uint64) uint64 {
 	next := s.lastRevision
 	if onDisk > next {

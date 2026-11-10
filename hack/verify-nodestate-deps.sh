@@ -33,7 +33,13 @@ fi
 # would let a build failure arrive as an empty list, which the filter then
 # reports as "no external dependencies" — the gate passing precisely when it
 # could not run.
-if ! deps=$(go list -deps "${PACKAGES[@]}"); then
+#
+# -test includes what the _test.go files import. Without it, go list -deps
+# omits test-only dependencies, and an external import in a test of this
+# package would pass a gate whose whole point is that nothing here — the
+# tests included, since they are what a consumer runs — needs reconciling
+# across every consuming operator.
+if ! deps=$(go list -deps -test "${PACKAGES[@]}"); then
   echo "verify-nodestate-deps: go list failed; the dependency check did not run"
   exit 1
 fi
@@ -41,10 +47,16 @@ fi
 # Exempt only this package and its subpackages. Exempting the whole module
 # would let pkg/nodestate import another package from this repository and
 # still pass, which the package documentation says it does not do.
+#
+# -test also lists the package's own compiled-for-test variants — the
+# external test package (pkg/nodestate_test) and the synthesized test mains
+# (pkg/nodestate.test, printed once per package with a bracketed variant
+# suffix on the test package line). They are this package's, not external
+# dependencies, so the exemption covers them too.
 external=$(
   printf '%s\n' "$deps" |
     awk -F/ '$1 ~ /\./ { print }' |
-    grep -v "^${MODULE}/pkg/nodestate\(/\|$\)" || true
+    grep -v "^${MODULE}/pkg/nodestate\(/\|_\|\.test\|$\)" || true
 )
 
 if [ -n "$external" ]; then

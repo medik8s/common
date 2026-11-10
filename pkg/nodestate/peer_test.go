@@ -218,3 +218,39 @@ func TestPeerStatusString(t *testing.T) {
 }
 
 const healthyPeer = `{"schemaVersion":1,"node":"worker-0","agent":{"component":"snr"},"reboots":[]}`
+
+// TestLoadPeer_StateDirectoryIsAFileIsADeploymentFault is the regression for
+// a broken state directory reported as the peer's own problem.
+//
+// ErrNotDirectory was not classified as an access fault, so a state
+// directory that was actually a regular file surfaced as PeerUnusable —
+// "the peer's business, it will recover" — when it is a deployment fault on
+// this node that nothing will fix by itself. A consumer following the
+// PeerRead.Configured contract would never raise the condition, and every
+// budget merged on this node would quietly miss that peer's history for as
+// long as the misconfiguration lasted.
+func TestLoadPeer_StateDirectoryIsAFileIsADeploymentFault(t *testing.T) {
+	t.Parallel()
+
+	root := tempStateDir(t)
+	notADirectory := filepath.Join(root, "state")
+	mustWrite(t, notADirectory, "a regular file where the state directory belongs")
+
+	s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(notADirectory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.LoadPeer(context.Background(), nodestate.ComponentSNR)
+	if err != nil {
+		t.Fatalf("LoadPeer: %v", err)
+	}
+	if res.Status != nodestate.PeerUnreadable {
+		t.Fatalf("Status = %v, want PeerUnreadable (cause: %v)", res.Status, res.Cause)
+	}
+	if !res.Configured() {
+		t.Error("Configured() = false; a state directory that is a regular file is a deployment fault on this node")
+	}
+	if !errors.Is(res.Cause, nodestate.ErrNotDirectory) {
+		t.Errorf("Cause = %v, want it to wrap ErrNotDirectory", res.Cause)
+	}
+}
