@@ -76,7 +76,7 @@ func TestAtomicWrite_ReaderNeverSeesPartial(t *testing.T) {
 	}
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	duration := 3 * time.Second
 	if deadline, ok := t.Deadline(); ok {
 		if remaining := time.Until(deadline) / 3; remaining < duration {

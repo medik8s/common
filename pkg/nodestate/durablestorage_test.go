@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // privateDirUnder creates a 0700 directory under parent, or skips when that
@@ -106,7 +107,7 @@ func TestCheckDurableStorage_ToleratesAnAbsentDirectory(t *testing.T) {
 	t.Parallel()
 
 	s, err := nodestate.New(nodestate.ComponentSBR,
-		nodestate.WithDir(filepath.Join(tempStateDir(t), "not-created-yet")))
+		nodestate.WithDir(filepath.Join(nodestatetest.TempStateDir(t), "not-created-yet")))
 	if err != nil {
 		t.Fatal(err)
 	}

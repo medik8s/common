@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // The tests in this file run real operating system processes against one
@@ -176,7 +177,7 @@ func TestMultiProcess_SeparateFiles(t *testing.T) {
 		t.Skip("skipping a multi-process test in short mode")
 	}
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	const runFor = 3 * time.Second
 
 	children := []*exec.Cmd{
@@ -244,7 +245,7 @@ func TestMultiProcess_SameFile(t *testing.T) {
 		t.Skip("skipping a multi-process test in short mode")
 	}
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	const runFor = 3 * time.Second
 
 	children := []*exec.Cmd{
@@ -317,7 +318,7 @@ func TestMultiProcess_KilledMidWrite(t *testing.T) {
 		t.Skip("skipping a multi-process test in short mode")
 	}
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	path := filepath.Join(dir, nodestate.SBRFile)
 
 	const rounds = 25

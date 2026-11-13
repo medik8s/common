@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // TestRetentionFitsTheWriteLimit ties three defaults together that were
@@ -100,7 +101,7 @@ func TestRetentionFitsTheWriteLimit(t *testing.T) {
 func TestTwoStoresOnOneFileDoNotLoseUpdates(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	ctx := context.Background()
 
 	const stores, perStore = 4, 20
@@ -156,7 +157,7 @@ func TestTwoStoresOnOneFileDoNotLoseUpdates(t *testing.T) {
 func TestStoresOnDifferentFilesDoNotBlockEachOther(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	ctx := context.Background()
 
 	sbr, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
@@ -232,7 +233,7 @@ func TestRecoveryEventIsNotEmittedForAFirstBoot(t *testing.T) {
 func TestEnsureDirectory_DoesNotChmodThroughASymlink(t *testing.T) {
 	t.Parallel()
 
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	victim := filepath.Join(root, "victim")
 	if err := os.Mkdir(victim, 0o755); err != nil {
 		t.Fatal(err)
@@ -268,7 +269,7 @@ func TestEnsureDirectory_DoesNotChmodThroughASymlink(t *testing.T) {
 func TestEnsureDirectory_LeavesACorrectModeAlone(t *testing.T) {
 	t.Parallel()
 
-	dir := filepath.Join(tempStateDir(t), "state")
+	dir := filepath.Join(nodestatetest.TempStateDir(t), "state")
 	s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
