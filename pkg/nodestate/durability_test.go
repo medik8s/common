@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -189,5 +191,58 @@ func TestUnconfirmedWriteLeavesNoTemporaryFile(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != nodestate.SBRFile {
 		t.Errorf("directory holds %v, want just %s", names(entries), nodestate.SBRFile)
+	}
+}
+
+// TestEnsureDirectoryRetriesFailedDirectorySync closes a gap in the recovery
+// half of ensureDirectory's durability work. When a creation attempt
+// synchronizes the new directory's parent and that sync fails, the directory
+// exists and passes every security check — so a later ensureDirectory took
+// the existing-directory branch and reported success, silently treating the
+// entry as durable. It now retries the unfinished sync first: one transient
+// SyncDir failure must not downgrade every later "success" for the life of
+// the process.
+func TestEnsureDirectoryRetriesFailedDirectorySync(t *testing.T) {
+	t.Parallel()
+
+	rec := nodestatetest.NewRecordingFS(nodestatetest.OSFileSystem())
+	faulty := nodestatetest.NewFaultyFS(rec)
+	dir := filepath.Join(nodestatetest.TempStateDir(t), "state")
+	s, err := nodestate.New(nodestate.ComponentSBR,
+		nodestate.WithDir(dir), nodestate.WithFileSystem(faulty))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// First attempt: the directory is created, but confirming its entry in
+	// the parent fails.
+	faulty.FailOnce(nodestatetest.OpSyncDir, syscall.EIO)
+	first := s.EnsureDirectory(ctx)
+	if first == nil {
+		t.Fatal("EnsureDirectory: want the directory-entry sync failure to surface")
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("the directory was not created: %v", err)
+	}
+
+	// Second attempt: the directory exists, so this takes the
+	// existing-directory branch — which must retry the pending sync before
+	// reporting success.
+	before := rec.Count(nodestatetest.OpSyncDir)
+	if err := s.EnsureDirectory(ctx); err != nil {
+		t.Fatalf("EnsureDirectory retry: %v", err)
+	}
+	if got := rec.Count(nodestatetest.OpSyncDir) - before; got < 1 {
+		t.Errorf("the pending directory sync was not retried (%d new sync-dir calls)", got)
+	}
+
+	// Third attempt: nothing left to retry, still a success.
+	before = rec.Count(nodestatetest.OpSyncDir)
+	if err := s.EnsureDirectory(ctx); err != nil {
+		t.Fatalf("EnsureDirectory steady state: %v", err)
+	}
+	if got := rec.Count(nodestatetest.OpSyncDir) - before; got != 0 {
+		t.Errorf("steady state resynchronized the directory (%d new sync-dir calls)", got)
 	}
 }
