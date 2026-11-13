@@ -249,6 +249,13 @@ type Store struct {
 	confirmedRevision uint64
 	confirmedWriterID string
 	confirmedValid    bool
+
+	// pendingDirSyncs lists directories whose entry in their parent was not
+	// confirmed durable: a creation attempt synchronized an earlier ancestor
+	// and then failed. The next ensureDirectory on this Store retries them
+	// before reporting success. The state is per-instance and not shared with
+	// other Stores of the same path. See retryPendingDirSyncs.
+	pendingDirSyncs []string
 }
 
 // fileLocks maps a state file path to the mutex serialising access to it
@@ -540,13 +547,29 @@ func (s *Store) EnsureDirectory(ctx context.Context) error {
 }
 
 func (s *Store) ensureDirectory() error {
-	fi, err := s.fs.Lstat(s.dir)
+	// Use the same symlink policy as the read paths (verifyDirectoryIfPresent):
+	// a policy that allows symlinks may legitimately point the state directory
+	// at one, and Lstat would report the link itself — which is never a
+	// directory — making EnsureDirectory refuse a directory every read already
+	// accepts. Without the allowance, Lstat remains the no-follow check the
+	// security policy wants.
+	stat := s.fs.Lstat
+	if s.security.AllowSymlinks {
+		stat = s.fs.Stat
+	}
+	fi, err := stat(s.dir)
 	switch {
 	case err == nil:
 		if err := s.checkResolvedPath(); err != nil {
 			return err
 		}
-		return s.security.checkDirectory(s.dir, fi)
+		if err := s.security.checkDirectory(s.dir, fi); err != nil {
+			return err
+		}
+		// The directory exists and passes the security checks, but a previous
+		// creation attempt may have left its entry — or an ancestor's —
+		// unsynchronized. Confirm that work before reporting success.
+		return s.retryPendingDirSyncs()
 	case !errors.Is(err, fs.ErrNotExist):
 		return pathErrorf("lstat", s.dir, err)
 	}
@@ -589,9 +612,13 @@ func (s *Store) ensureDirectory() error {
 	// start-up path, and on a node with failing storage every extra fsync is
 	// another chance to block; a failure on one of them would stop the agent
 	// starting at all, over a directory it never modified.
-	for _, dir := range created {
+	for i, dir := range created {
 		parent := filepath.Dir(dir)
 		if err := s.fs.SyncDir(parent); err != nil {
+			// Record the failed entry and every deeper one, so a later
+			// ensureDirectory on this Store retries them before reporting
+			// success instead of silently treating them as durable.
+			s.pendingDirSyncs = append(s.pendingDirSyncs, created[i:]...)
 			return pathErrorf("fsync", parent, err)
 		}
 	}
@@ -600,17 +627,45 @@ func (s *Store) ensureDirectory() error {
 	// restrictive than asked for but never less. Set the mode explicitly, and
 	// only when it differs, so the result does not depend on how the agent was
 	// launched.
-	if fi.Mode().Perm() == s.security.DirMode.Perm() {
-		return nil
+	if fi.Mode().Perm() != s.security.DirMode.Perm() {
+		if err := s.fs.Chmod(s.dir, s.security.DirMode); err != nil {
+			return pathErrorf("chmod", s.dir, err)
+		}
+		fi, err = s.fs.Lstat(s.dir)
+		if err != nil {
+			return pathErrorf("lstat", s.dir, err)
+		}
+		if err := s.security.checkDirectory(s.dir, fi); err != nil {
+			return err
+		}
 	}
-	if err := s.fs.Chmod(s.dir, s.security.DirMode); err != nil {
-		return pathErrorf("chmod", s.dir, err)
+	// Everything this call created is synchronized; drain anything a previous
+	// attempt left behind so the invariant holds: a nil return means no
+	// directory entry is waiting on a sync.
+	return s.retryPendingDirSyncs()
+}
+
+// retryPendingDirSyncs confirms the directory entries whose parent sync failed
+// during an earlier creation attempt by this Store. It is the recovery half of
+// ensureDirectory's durability work: one transient SyncDir failure must not
+// leave the entry unconfirmed for the rest of this Store's life, silently
+// downgrading every later "success".
+//
+// The recovery state is deliberately scoped to this Store instance, not shared
+// across the Stores of one process: another instance targeting the same path,
+// or a replacement created after this one is discarded, does not inherit it,
+// and neither does a later process. Sharing it would be a separate design
+// change. Those residual windows are accepted; the first Load's durability
+// confirmation still covers the state file's own directory.
+func (s *Store) retryPendingDirSyncs() error {
+	for len(s.pendingDirSyncs) > 0 {
+		dir := s.pendingDirSyncs[0]
+		if err := s.fs.SyncDir(filepath.Dir(dir)); err != nil {
+			return pathErrorf("fsync", filepath.Dir(dir), err)
+		}
+		s.pendingDirSyncs = s.pendingDirSyncs[1:]
 	}
-	fi, err = s.fs.Lstat(s.dir)
-	if err != nil {
-		return pathErrorf("lstat", s.dir, err)
-	}
-	return s.security.checkDirectory(s.dir, fi)
+	return nil
 }
 
 // checkResolvedPath refuses a state directory reached through a symbolic
@@ -1141,9 +1196,19 @@ func (s *Store) writeLocked(doc *Document) error {
 	if err != nil {
 		return fmt.Errorf("nodestate: encoding the document for %s: %w", s.self, err)
 	}
-	if len(encoded) > s.maxDocumentBytes {
+	// A written document must also be readable back by this Store: reads
+	// enforce maxReadBytes, so a document between the two limits would be
+	// written successfully and then be unreadable to the very process that
+	// wrote it. Enforce the smaller of the two limits before the live file
+	// is replaced, so every successful write is a document this Store can
+	// still load.
+	limit := s.maxDocumentBytes
+	if s.maxReadBytes < limit {
+		limit = s.maxReadBytes
+	}
+	if len(encoded) > limit {
 		return fmt.Errorf("%w: the encoded document is %d bytes, over the %d byte limit; trim the history you are accumulating",
-			ErrTooLarge, len(encoded), s.maxDocumentBytes)
+			ErrTooLarge, len(encoded), limit)
 	}
 
 	if err := s.ensureDirectory(); err != nil {
