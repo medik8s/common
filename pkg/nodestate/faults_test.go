@@ -20,7 +20,7 @@ import (
 func TestLoad_FileThatGrowsBetweenStatAndReadIsRefused(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	path := filepath.Join(dir, nodestate.SBRFile)
 	mustWrite(t, path, `{"schemaVersion":1}`)
 
@@ -66,7 +66,7 @@ func (i shrunkInfo) Size() int64 { return i.size }
 func TestLoad_FileRemovedBetweenStatAndOpenReadsAsAbsent(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	path := filepath.Join(dir, nodestate.SBRFile)
 	mustWrite(t, path, `{"schemaVersion":1,"node":"worker-0"}`)
 
@@ -138,7 +138,7 @@ func TestLoad_RunningDegradedOnAReadOnlyHostPath(t *testing.T) {
 func TestLoad_StatFailureIsAnError(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	broken := nodestatetest.NewFaultyFS(nodestate.OSFileSystem())
 	injected := errors.New("EIO")
 	broken.FailAlways(nodestatetest.OpLstat, injected)
@@ -171,7 +171,7 @@ func TestHostPathFault_IsNotAStorageFault(t *testing.T) {
 	broken.FailAlways(nodestatetest.OpCreateTemp, errors.New("ENOSPC"))
 
 	s, err := nodestate.New(nodestate.ComponentSBR,
-		nodestate.WithDir(tempStateDir(t)), nodestate.WithFileSystem(broken))
+		nodestate.WithDir(nodestatetest.TempStateDir(t)), nodestate.WithFileSystem(broken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestReadAll_ExplicitComponentSet(t *testing.T) {
 func TestReadAll_IncludesASelfComponentOutsideTheKnownSet(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	s, err := nodestate.New(nodestate.Component("fence-agent"), nodestate.WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +291,7 @@ func TestRecordingFS_CountAndReset(t *testing.T) {
 func TestFaultyFS_OnlyFailWhenAndClear(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	faulty := nodestatetest.NewFaultyFS(nodestate.OSFileSystem())
 	injected := errors.New("injected")
 	faulty.FailAlways(nodestatetest.OpWrite, injected)

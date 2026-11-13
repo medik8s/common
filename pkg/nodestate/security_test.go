@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // TestDirectoryPermissions covers concern D1s: the state directory is a
@@ -233,7 +234,7 @@ func TestNoSymlinkFollow(t *testing.T) {
 	t.Run("a policy may opt in to following symlinks", func(t *testing.T) {
 		t.Parallel()
 
-		dir := tempStateDir(t)
+		dir := nodestatetest.TempStateDir(t)
 		target := filepath.Join(dir, "target.json")
 		mustWrite(t, target, `{"schemaVersion":1,"node":"linked"}`)
 		if err := os.Symlink(target, filepath.Join(dir, nodestate.SBRFile)); err != nil {
@@ -306,7 +307,7 @@ func TestEnsureDirectory_IsIdempotent(t *testing.T) {
 func TestIntermediateSymlinkIsRefused(t *testing.T) {
 	t.Parallel()
 
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	elsewhere := filepath.Join(root, "elsewhere")
 	if err := os.MkdirAll(filepath.Join(elsewhere, "state"), 0o700); err != nil {
 		t.Fatal(err)
@@ -337,7 +338,7 @@ func TestIntermediateSymlinkIsRefused(t *testing.T) {
 func TestIntermediateSymlinkCanBeAllowed(t *testing.T) {
 	t.Parallel()
 
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	elsewhere := filepath.Join(root, "elsewhere")
 	if err := os.MkdirAll(filepath.Join(elsewhere, "state"), 0o700); err != nil {
 		t.Fatal(err)

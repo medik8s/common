@@ -183,7 +183,7 @@ func TestReviewReadPathsEnforceDirectorySecurity(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"ancestor-symlink", "directory-symlink", "permissions"} {
 		t.Run(kind, func(t *testing.T) {
-			root := tempStateDir(t)
+			root := nodestatetest.TempStateDir(t)
 			real := filepath.Join(root, "real")
 			if err := os.Mkdir(real, 0700); err != nil {
 				t.Fatal(err)

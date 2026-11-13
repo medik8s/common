@@ -47,7 +47,7 @@ func TestDurabilityConfirmationIsCached(t *testing.T) {
 func TestFirstLoadOfAProcessConfirms(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	first, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestConfirmDurabilityRefusesUncertainHistory(t *testing.T) {
 func TestOnlyCreatedDirectoriesAreSynchronized(t *testing.T) {
 	t.Parallel()
 
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	rec := nodestatetest.NewRecordingFS(nodestate.OSFileSystem())
 	dir := filepath.Join(root, "var", "lib", "medik8s", "state")
 	s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir), nodestate.WithFileSystem(rec))

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // TestTwoStoresInOneProcessAreNotForeignToEachOther is the false positive the
@@ -23,7 +24,7 @@ import (
 func TestTwoStoresInOneProcessAreNotForeignToEachOther(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	ctx := context.Background()
 
 	a, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
@@ -141,7 +142,7 @@ func TestWriteKeepsACallerSuppliedStartedAt(t *testing.T) {
 func TestRestartIsNotAForeignWrite(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	ctx := context.Background()
 
 	first, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
@@ -209,7 +210,7 @@ func TestAnotherProcessIsStillDetected(t *testing.T) {
 func TestRestartDoesNotPairThisPIDWithThePredecessorsStartTime(t *testing.T) {
 	t.Parallel()
 
-	dir := tempStateDir(t)
+	dir := nodestatetest.TempStateDir(t)
 	ctx := context.Background()
 
 	// A journal left behind by a predecessor: its own PID, started at a time

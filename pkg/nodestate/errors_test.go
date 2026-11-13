@@ -166,7 +166,7 @@ func TestOptions_AcceptValidValues(t *testing.T) {
 
 	clk := nodestatetest.NewFakeClock(time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC))
 	s, err := nodestate.New(nodestate.ComponentSBR,
-		nodestate.WithDir(tempStateDir(t)),
+		nodestate.WithDir(nodestatetest.TempStateDir(t)),
 		nodestate.WithRetention(policy),
 		nodestate.WithClock(clk),
 		nodestate.WithMaxDocumentBytes(1<<16),
@@ -201,7 +201,7 @@ func TestSecurityPolicy_AllowedUIDs(t *testing.T) {
 	policy.AllowedUIDs = []int{os.Geteuid()}
 
 	s, err := nodestate.New(nodestate.ComponentSBR,
-		nodestate.WithDir(tempStateDir(t)), nodestate.WithSecurityPolicy(policy))
+		nodestate.WithDir(nodestatetest.TempStateDir(t)), nodestate.WithSecurityPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestSecurityPolicy_AllowedUIDs(t *testing.T) {
 
 	policy.AllowedUIDs = []int{os.Geteuid() + 1000}
 	s2, err := nodestate.New(nodestate.ComponentSBR,
-		nodestate.WithDir(tempStateDir(t)), nodestate.WithSecurityPolicy(policy))
+		nodestate.WithDir(nodestatetest.TempStateDir(t)), nodestate.WithSecurityPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestEnsureDirectory_SurfacesACreationFailure(t *testing.T) {
 	// A regular file where a parent directory belongs: MkdirAll cannot
 	// proceed, and the caller must be told rather than left to discover it on
 	// the first write.
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	blocker := root + "/blocker"
 	mustWrite(t, blocker, "")
 

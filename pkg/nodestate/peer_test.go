@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/medik8s/common/pkg/nodestate"
+	"github.com/medik8s/common/pkg/nodestate/nodestatetest"
 )
 
 // TestLoadPeer_UnreadableIsNotAbsent is the distinction ReadPeer cannot make.
@@ -232,7 +233,7 @@ const healthyPeer = `{"schemaVersion":1,"node":"worker-0","agent":{"component":"
 func TestLoadPeer_StateDirectoryIsAFileIsADeploymentFault(t *testing.T) {
 	t.Parallel()
 
-	root := tempStateDir(t)
+	root := nodestatetest.TempStateDir(t)
 	notADirectory := filepath.Join(root, "state")
 	mustWrite(t, notADirectory, "a regular file where the state directory belongs")
 

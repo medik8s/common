@@ -189,7 +189,7 @@ func TestCleanup_ExpiresOldQuarantineFiles(t *testing.T) {
 func TestCleanup_ToleratesAnAbsentDirectory(t *testing.T) {
 	t.Parallel()
 
-	dir := filepath.Join(tempStateDir(t), "not-created-yet")
+	dir := filepath.Join(nodestatetest.TempStateDir(t), "not-created-yet")
 	s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(dir))
 	if err != nil {
 		t.Fatal(err)

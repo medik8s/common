@@ -11,7 +11,7 @@
 //
 //	fsys := nodestatetest.NewFaultyFS(nodestatetest.OSFileSystem())
 //	store, err := nodestate.New(nodestate.ComponentSBR,
-//	    nodestate.WithDir(t.TempDir()),
+//	    nodestate.WithDir(nodestatetest.TempStateDir(t)),
 //	    nodestate.WithFileSystem(fsys))
 //	// ...
 //	fsys.FailAlways(nodestatetest.OpWrite, syscall.ENOSPC)
@@ -22,7 +22,9 @@ package nodestatetest
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/medik8s/common/pkg/nodestate"
@@ -64,6 +66,38 @@ type Record struct {
 
 // OSFileSystem returns the real filesystem, for wrapping.
 func OSFileSystem() nodestate.FS { return nodestate.OSFileSystem() }
+
+// TempStateDir returns a fresh temporary directory that a nodestate.Store
+// accepts under the default security policy, with its removal registered on
+// t's cleanup. Use it wherever a test needs a real state directory.
+//
+// A plain t.TempDir is not one, for two reasons, and a test that uses it
+// with the real filesystem fails on the first store operation:
+//
+//   - Privacy. The default policy refuses a state directory other users can
+//     act on, but t.TempDir creates the directory it returns with
+//     os.Mkdir(path, 0o777), so its mode is 0777 masked by the umask —
+//     group- and world-readable under the usual 022. The parent directory
+//     t.TempDir makes once per test is private; the numbered directory it
+//     hands out is not.
+//   - A real path. The policy refuses a state directory reached through a
+//     symbolic link, and temporary directories sit under one on some
+//     platforms: macOS puts them under /var, a link to /private/var.
+//
+// The returned path is resolved, so it names the directory itself rather
+// than a path to it.
+func TempStateDir(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod %s: %v", dir, err)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", dir, err)
+	}
+	return resolved
+}
 
 // hookFS is a nodestate.FS that calls a hook before delegating. The hook may
 // return an error, which is returned to the caller without the inner
