@@ -910,3 +910,49 @@ func TestWriteContinuesTheRevisionSequenceFromDisk(t *testing.T) {
 		t.Errorf("Update after Write produced revision %d, want 5", doc.Revision)
 	}
 }
+
+// TestWriteEnforcesTheReadLimitToo keeps the write and read limits coherent.
+// readDocument enforces maxReadBytes, so a Store configured with
+// maxDocumentBytes above maxReadBytes could write a document it could never
+// load back — the write succeeded and the process's own state became
+// unreadable. The write path now rejects anything over the smaller of the two
+// limits, before the live file is replaced.
+func TestWriteEnforcesTheReadLimitToo(t *testing.T) {
+	t.Parallel()
+
+	dir := nodestatetest.TempStateDir(t)
+	s, err := nodestate.New(nodestate.ComponentSBR,
+		nodestate.WithDir(dir),
+		nodestate.WithMaxDocumentBytes(64<<10),
+		nodestate.WithMaxReadBytes(512))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A document that fits the document limit but exceeds the read limit.
+	doc := nodestate.NewDocument(nodestate.ComponentSBR)
+	doc.Node = strings.Repeat("n", 1024)
+	err = s.Write(context.Background(), doc)
+	if !errors.Is(err, nodestate.ErrTooLarge) {
+		t.Fatalf("Write: %v, want ErrTooLarge", err)
+	}
+
+	// The live file is unchanged by the refusal: nothing was initialized.
+	if _, err := os.Stat(filepath.Join(dir, nodestate.SBRFile)); !os.IsNotExist(err) {
+		t.Fatalf("the rejected write left a file behind: %v", err)
+	}
+
+	// A document under both limits writes and reads back normally.
+	small := nodestate.NewDocument(nodestate.ComponentSBR)
+	small.Node = "fits"
+	if err := s.Write(context.Background(), small); err != nil {
+		t.Fatalf("Write within both limits: %v", err)
+	}
+	got, err := s.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read after Write within both limits: %v", err)
+	}
+	if got.Node != "fits" {
+		t.Fatalf("Node = %q, want %q", got.Node, "fits")
+	}
+}

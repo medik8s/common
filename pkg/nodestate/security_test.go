@@ -381,3 +381,58 @@ func TestResolvedPathCheckAcceptsAnOrdinaryDirectory(t *testing.T) {
 		t.Fatalf("EnsureDirectory on a path it created: %v", err)
 	}
 }
+
+// TestEnsureDirectory_SymlinkPolicyCoversTheStateDirectoryItself closes an
+// inconsistency between the read and write paths: verifyDirectoryIfPresent
+// follows a state-directory symlink when the policy allows symlinks, but
+// ensureDirectory always Lstat'ed, so the very policy that made such a
+// directory readable made EnsureDirectory — and therefore every write — fail
+// it with ErrNotDirectory. The same AllowSymlinks-dependent Stat/Lstat choice
+// now applies to both.
+func TestEnsureDirectory_SymlinkPolicyCoversTheStateDirectoryItself(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	t.Run("default policy refuses the link", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := nodestate.New(nodestate.ComponentSBR, nodestate.WithDir(link))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.EnsureDirectory(context.Background()); !errors.Is(err, nodestate.ErrSymlink) {
+			t.Fatalf("EnsureDirectory: %v, want ErrSymlink", err)
+		}
+	})
+
+	t.Run("allowing policy accepts the link for reads, EnsureDirectory and writes", func(t *testing.T) {
+		t.Parallel()
+
+		policy := nodestate.DefaultSecurityPolicy()
+		policy.AllowSymlinks = true
+		s, err := nodestate.New(nodestate.ComponentSBR,
+			nodestate.WithDir(link), nodestate.WithSecurityPolicy(policy))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		if err := s.EnsureDirectory(ctx); err != nil {
+			t.Fatalf("EnsureDirectory through the allowed symlink: %v", err)
+		}
+		if err := s.Write(ctx, nodestate.NewDocument(nodestate.ComponentSBR)); err != nil {
+			t.Fatalf("Write through the allowed symlink: %v", err)
+		}
+		if _, err := s.Load(ctx); err != nil {
+			t.Fatalf("Load through the allowed symlink: %v", err)
+		}
+	})
+}
