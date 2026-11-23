@@ -15,10 +15,16 @@ import (
 // replaced Node object fails the write with HTTP 422 before any spec change
 // is applied (verified against a live API server). A plain JSON merge patch
 // and a strategic merge patch are byte-identical for this body.
+//
+// The optional annotations merge into metadata.annotations by key
+// (strategic-merge map semantics): keys already on the Node that the patch
+// does not name are left untouched. This shape cannot express an annotation
+// deletion; releasing an annotation requires a separate write.
 type unschedulablePatch struct {
 	Metadata struct {
-		UID             string `json:"uid"`
-		ResourceVersion string `json:"resourceVersion,omitempty"`
+		UID             string            `json:"uid"`
+		ResourceVersion string            `json:"resourceVersion,omitempty"`
+		Annotations     map[string]string `json:"annotations,omitempty"`
 	} `json:"metadata"`
 	Spec struct {
 		Unschedulable bool `json:"unschedulable"`
@@ -42,15 +48,31 @@ type unschedulablePatch struct {
 // A cordon blocks new scheduling only. It does not stop kubelet from
 // restarting pods already bound to the node and does not evict anything.
 func (c *Client) PatchUnschedulable(ctx context.Context, unschedulable bool) (*Node, error) {
-	return c.patchUnschedulableAtVersion(ctx, unschedulable, "")
+	return c.patchUnschedulableAtVersion(ctx, unschedulable, "", nil)
+}
+
+// PatchUnschedulableWithAnnotations sets or clears the node's cordon flag and
+// merges annotations into the Node's metadata in the SAME write. See
+// PatchUnschedulable for the cordon semantics; the annotations follow
+// strategic-merge map semantics: keys already on the Node that the patch does
+// not name are left untouched, and a key set to the empty string is stored as
+// the empty string. Deletion cannot be expressed here — a caller that must
+// remove an annotation does so in a separate write.
+//
+// The one-write guarantee is the point: a caller that marks a cordon as its
+// own (an ownership key consumers match on to release it) must never be able
+// to observe a cordon without its marker or a marker without its cordon.
+func (c *Client) PatchUnschedulableWithAnnotations(ctx context.Context, unschedulable bool, annotations map[string]string) (*Node, error) {
+	return c.patchUnschedulableAtVersion(ctx, unschedulable, "", annotations)
 }
 
 // patchUnschedulableAtVersion lets diagnostic cleanup condition its write on
 // the exact snapshot it checked. Runtime Cordon/Uncordon remain UID-guarded.
-func (c *Client) patchUnschedulableAtVersion(ctx context.Context, unschedulable bool, rv string) (*Node, error) {
+func (c *Client) patchUnschedulableAtVersion(ctx context.Context, unschedulable bool, rv string, annotations map[string]string) (*Node, error) {
 	var p unschedulablePatch
 	p.Metadata.UID = c.cfg.ExpectedUID
 	p.Metadata.ResourceVersion = rv
+	p.Metadata.Annotations = annotations
 	p.Spec.Unschedulable = unschedulable
 	body, err := json.Marshal(p)
 	if err != nil {

@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,4 +232,133 @@ func TestCombinedKubeletPEM(t *testing.T) {
 	}
 	// The server required and verified a client certificate, so the pair
 	// was presented and matched the CA.
+}
+
+func TestPatchUnschedulableWithAnnotations(t *testing.T) {
+	// The SBR boot unit records its cordon as its own in the SAME write that
+	// cordons: the cordon and its ownership key can never be observed apart.
+	// A pre-existing annotation must survive (strategic-merge by key), and
+	// exactly one patch must reach the API.
+	pki := newTestPKI(t)
+	cert, key := pki.writeClientPair(t, "system:node:worker-1", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	fake := newFakeNodeAPI("worker-1", "uid-1")
+	fake.setAnnotation("kubectl.kubernetes.io/pre-existing", "keep-me")
+	srv := pki.newTestServer(t, fake.handler())
+	c := pki.newTestClient(t, srv.URL, "worker-1", "uid-1", cert, key)
+
+	n, err := c.PatchUnschedulableWithAnnotations(context.Background(), true,
+		map[string]string{"sbr.medik8s.io/rejoin-cordon": "incident-7"})
+	if err != nil {
+		t.Fatalf("PatchUnschedulableWithAnnotations: %v", err)
+	}
+	if !n.Spec.Unschedulable {
+		t.Fatal("response does not report spec.unschedulable=true")
+	}
+	if got := n.Metadata.Annotations["sbr.medik8s.io/rejoin-cordon"]; got != "incident-7" {
+		t.Fatalf("response annotations = %v, want the rejoin-cordon key", n.Metadata.Annotations)
+	}
+	if !fake.unschedulable() {
+		t.Fatal("fake did not store the cordon")
+	}
+	if got, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); !ok || got != "incident-7" {
+		t.Fatalf("stored annotation = %q, %v; want incident-7", got, ok)
+	}
+	if got, ok := fake.annotation("kubectl.kubernetes.io/pre-existing"); !ok || got != "keep-me" {
+		t.Fatalf("pre-existing annotation = %q, %v; the patch must merge by key, not replace the map", got, ok)
+	}
+	if fake.patch != 1 {
+		t.Fatalf("fake saw %d patches, want 1 — cordon and annotations must be one write", fake.patch)
+	}
+}
+
+func TestPatchUnschedulableWithAnnotationsValidatesIdentity(t *testing.T) {
+	// The UID precondition must stay atomic for the combined write: a
+	// replaced Node object fails with 422 before the cordon OR the
+	// annotations are applied.
+	pki := newTestPKI(t)
+	cert, key := pki.writeClientPair(t, "system:node:worker-1", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	fake := newFakeNodeAPI("worker-1", "uid-replaced")
+	srv := pki.newTestServer(t, fake.handler())
+	c := pki.newTestClient(t, srv.URL, "worker-1", "uid-original", cert, key)
+
+	if _, err := c.PatchUnschedulableWithAnnotations(context.Background(), true,
+		map[string]string{"sbr.medik8s.io/rejoin-cordon": "incident-7"}); !errors.Is(err, nodeidentity.ErrNodeNameMismatch) {
+		t.Fatalf("want ErrNodeNameMismatch for a replaced Node, got %v", err)
+	}
+	if fake.unschedulable() {
+		t.Fatal("cordon must not be stored when the UID precondition fails")
+	}
+	if _, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); ok {
+		t.Fatal("annotation must not be stored when the UID precondition fails")
+	}
+}
+
+func TestPatchStagingCommitsOnlyPermittedPersistentWrites(t *testing.T) {
+	// A dry-run or refused patch must leave the stored state untouched, while
+	// a dry-run response carries the proposed annotations and cordon. The
+	// handler is exercised over plain HTTP: what is under test is the fake's
+	// staging, not the client or the transport.
+	fake := newFakeNodeAPI("worker-1", "uid-1")
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	patch := func(body, query string) (int, []byte) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPatch,
+			srv.URL+"/api/v1/nodes/worker-1"+query, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/strategic-merge-patch+json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, data
+	}
+
+	cordonWithKey := `{"metadata":{"uid":"uid-1","annotations":{"sbr.medik8s.io/rejoin-cordon":"incident-1"}},"spec":{"unschedulable":true}}`
+
+	// Dry-run: the response proposes cordon and annotation; nothing persists.
+	code, body := patch(cordonWithKey, "?dryRun=All")
+	if code != http.StatusOK {
+		t.Fatalf("dry-run status = %d", code)
+	}
+	if !strings.Contains(string(body), `"unschedulable":true`) ||
+		!strings.Contains(string(body), "sbr.medik8s.io/rejoin-cordon") {
+		t.Fatalf("dry-run response does not carry the proposed state: %s", body)
+	}
+	if fake.unschedulable() {
+		t.Fatal("dry-run persisted the cordon")
+	}
+	if _, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); ok {
+		t.Fatal("dry-run persisted the annotation")
+	}
+	if rv := fake.resourceVersion(); rv != "100" {
+		t.Fatalf("dry-run bumped the resource version to %s", rv)
+	}
+
+	// A refused write (taints forbidden by default) persists nothing — not
+	// even the annotations that rode along in the same patch.
+	code, _ = patch(`{"metadata":{"uid":"uid-1","annotations":{"sbr.medik8s.io/rejoin-cordon":"incident-2"}},"spec":{"taints":[{"key":"k","effect":"NoSchedule"}]}}`, "")
+	if code != http.StatusForbidden {
+		t.Fatalf("taint patch status = %d, want 403", code)
+	}
+	if _, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); ok {
+		t.Fatal("a refused write persisted the annotation")
+	}
+
+	// The same patch without taints is permitted and commits.
+	code, _ = patch(`{"metadata":{"uid":"uid-1","annotations":{"sbr.medik8s.io/rejoin-cordon":"incident-3"}},"spec":{"unschedulable":true}}`, "")
+	if code != http.StatusOK {
+		t.Fatalf("persistent patch status = %d", code)
+	}
+	if got, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); !ok || got != "incident-3" {
+		t.Fatalf("persistent patch did not commit the annotation: %q, %v", got, ok)
+	}
+	if !fake.unschedulable() {
+		t.Fatal("persistent patch did not commit the cordon")
+	}
 }

@@ -186,6 +186,7 @@ type fakeNodeAPI struct {
 	rv          int
 	conditions  []nodeidentity.Condition
 	taints      []nodeidentity.Taint
+	annotations map[string]string
 	unsched     bool
 	refuseTaint bool
 	conflicts   int
@@ -252,11 +253,20 @@ func (f *fakeNodeAPI) nodeJSON() []byte {
 }
 
 func (f *fakeNodeAPI) marshalLocked() []byte {
+	return f.marshalStateLocked(f.taints, f.annotations, f.unsched)
+}
+
+// marshalStateLocked marshals the Node as it would look with the given
+// taints, annotations and cordon flag — the stored identity, resourceVersion
+// and conditions, so a dry-run response shows the proposal without
+// persisting it or its RV.
+func (f *fakeNodeAPI) marshalStateLocked(taints []nodeidentity.Taint, annotations map[string]string, unsched bool) []byte {
 	n := struct {
 		Metadata struct {
-			Name            string `json:"name"`
-			UID             string `json:"uid"`
-			ResourceVersion string `json:"resourceVersion"`
+			Name            string            `json:"name"`
+			UID             string            `json:"uid"`
+			ResourceVersion string            `json:"resourceVersion"`
+			Annotations     map[string]string `json:"annotations,omitempty"`
 		} `json:"metadata"`
 		Spec struct {
 			Unschedulable bool                 `json:"unschedulable,omitempty"`
@@ -269,17 +279,64 @@ func (f *fakeNodeAPI) marshalLocked() []byte {
 	n.Metadata.Name = f.name
 	n.Metadata.UID = f.uid
 	n.Metadata.ResourceVersion = fmt.Sprintf("%d", f.rv)
-	n.Spec.Unschedulable = f.unsched
-	n.Spec.Taints = f.taints
+	n.Metadata.Annotations = annotations
+	n.Spec.Unschedulable = unsched
+	n.Spec.Taints = taints
 	n.Status.Conditions = f.conditions
 	b, _ := json.Marshal(n)
 	return b
 }
 
+// setAnnotation pre-seeds an annotation, so tests can assert that a patch
+// merges by key instead of replacing the whole map.
+func (f *fakeNodeAPI) setAnnotation(key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.annotations == nil {
+		f.annotations = map[string]string{}
+	}
+	f.annotations[key] = value
+}
+
+// annotation returns one stored annotation.
+func (f *fakeNodeAPI) annotation(key string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.annotations[key]
+	return v, ok
+}
+
+// proposeAnnotationsLocked returns the annotations a patch would leave
+// behind, without touching the stored map: strategic-merge map semantics, a
+// JSON string sets the key, a JSON null removes it. A nil input returns the
+// stored map unchanged. Callers commit the result only when the whole write
+// succeeds.
+func (f *fakeNodeAPI) proposeAnnotationsLocked(in map[string]json.RawMessage) map[string]string {
+	if in == nil {
+		return f.annotations
+	}
+	proposed := make(map[string]string, len(f.annotations)+len(in))
+	for k, v := range f.annotations {
+		proposed[k] = v
+	}
+	for k, raw := range in {
+		if string(raw) == "null" {
+			delete(proposed, k)
+			continue
+		}
+		var v string
+		_ = json.Unmarshal(raw, &v)
+		proposed[k] = v
+	}
+	return proposed
+}
+
 func (f *fakeNodeAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		if len(r.TLS.PeerCertificates) > 0 {
+		// Plain-HTTP tests exercise the handler without TLS; the client
+		// certificate recording simply has nothing to record then.
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 			f.peerCNs = append(f.peerCNs, r.TLS.PeerCertificates[0].Subject.CommonName)
 		}
 		f.proto = r.Proto
@@ -363,8 +420,9 @@ func (f *fakeNodeAPI) handler() http.Handler {
 			}
 			var p struct {
 				Metadata struct {
-					UID             string `json:"uid"`
-					ResourceVersion string `json:"resourceVersion"`
+					UID             string                     `json:"uid"`
+					ResourceVersion string                     `json:"resourceVersion"`
+					Annotations     map[string]json.RawMessage `json:"annotations"`
 				} `json:"metadata"`
 				Spec struct {
 					Unschedulable *bool `json:"unschedulable"`
@@ -393,6 +451,13 @@ func (f *fakeNodeAPI) handler() http.Handler {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
+			// Stage every proposed change — annotations, taints, cordon —
+			// and commit only when the whole write is permitted and
+			// persistent. A refused or dry-run request must leave the
+			// stored state untouched; a dry-run response carries the
+			// proposed state without persisting it or its RV.
+			proposedAnnotations := f.proposeAnnotationsLocked(p.Metadata.Annotations)
+			proposedTaints := f.taints
 			if len(p.Spec.Taints) > 0 {
 				// Record whether the taint probe requested dry-run
 				// processing, so tests can assert the request shape.
@@ -402,26 +467,26 @@ func (f *fakeNodeAPI) handler() http.Handler {
 					_, _ = w.Write([]byte(`{"kind":"Status","status":"Failure","code":403,"reason":"Forbidden","message":"node \"` + f.name + `\" is not allowed to modify taints"}`))
 					return
 				}
-				// Node taints are atomic, not a merge-by-key list. Dry-run
-				// returns the proposed object without persisting it or its RV.
-				proposed := make([]nodeidentity.Taint, len(p.Spec.Taints))
+				// Node taints are atomic, not a merge-by-key list.
+				proposedTaints = make([]nodeidentity.Taint, len(p.Spec.Taints))
 				for i, taint := range p.Spec.Taints {
-					proposed[i] = taint.Taint
+					proposedTaints[i] = taint.Taint
 				}
-				if r.URL.Query().Get("dryRun") == "All" {
-					saved := f.taints
-					f.taints = proposed
-					data := f.marshalLocked()
-					f.taints = saved
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write(data)
-					return
-				}
-				f.taints = proposed
 			}
+			proposedUnsched := f.unsched
 			if p.Spec.Unschedulable != nil {
-				f.unsched = *p.Spec.Unschedulable
+				proposedUnsched = *p.Spec.Unschedulable
 			}
+
+			if r.URL.Query().Get("dryRun") == "All" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(f.marshalStateLocked(proposedTaints, proposedAnnotations, proposedUnsched))
+				return
+			}
+
+			f.taints = proposedTaints
+			f.unsched = proposedUnsched
+			f.annotations = proposedAnnotations
 			f.rv++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(f.marshalLocked())
@@ -583,4 +648,12 @@ func (f *fakeNodeAPI) taintOf(key string) (nodeidentity.Taint, bool) {
 		}
 	}
 	return nodeidentity.Taint{}, false
+}
+
+// resourceVersion returns the stored resource version, for assertions that a
+// dry-run did not bump it.
+func (f *fakeNodeAPI) resourceVersion() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return fmt.Sprint(f.rv)
 }
