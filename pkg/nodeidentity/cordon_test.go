@@ -229,3 +229,62 @@ func TestCombinedKubeletPEM(t *testing.T) {
 	// The server required and verified a client certificate, so the pair
 	// was presented and matched the CA.
 }
+
+func TestPatchUnschedulableWithAnnotations(t *testing.T) {
+	// The SBR boot unit records its cordon as its own in the SAME write that
+	// cordons: the cordon and its ownership key can never be observed apart.
+	// A pre-existing annotation must survive (strategic-merge by key), and
+	// exactly one patch must reach the API.
+	pki := newTestPKI(t)
+	cert, key := pki.writeClientPair(t, "system:node:worker-1", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	fake := newFakeNodeAPI("worker-1", "uid-1")
+	fake.setAnnotation("kubectl.kubernetes.io/pre-existing", "keep-me")
+	srv := pki.newTestServer(t, fake.handler())
+	c := pki.newTestClient(t, srv.URL, "worker-1", "uid-1", cert, key)
+
+	n, err := c.PatchUnschedulableWithAnnotations(context.Background(), true,
+		map[string]string{"sbr.medik8s.io/rejoin-cordon": "incident-7"})
+	if err != nil {
+		t.Fatalf("PatchUnschedulableWithAnnotations: %v", err)
+	}
+	if !n.Spec.Unschedulable {
+		t.Fatal("response does not report spec.unschedulable=true")
+	}
+	if got := n.Metadata.Annotations["sbr.medik8s.io/rejoin-cordon"]; got != "incident-7" {
+		t.Fatalf("response annotations = %v, want the rejoin-cordon key", n.Metadata.Annotations)
+	}
+	if !fake.unschedulable() {
+		t.Fatal("fake did not store the cordon")
+	}
+	if got, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); !ok || got != "incident-7" {
+		t.Fatalf("stored annotation = %q, %v; want incident-7", got, ok)
+	}
+	if got, ok := fake.annotation("kubectl.kubernetes.io/pre-existing"); !ok || got != "keep-me" {
+		t.Fatalf("pre-existing annotation = %q, %v; the patch must merge by key, not replace the map", got, ok)
+	}
+	if fake.patch != 1 {
+		t.Fatalf("fake saw %d patches, want 1 — cordon and annotations must be one write", fake.patch)
+	}
+}
+
+func TestPatchUnschedulableWithAnnotationsValidatesIdentity(t *testing.T) {
+	// The UID precondition must stay atomic for the combined write: a
+	// replaced Node object fails with 422 before the cordon OR the
+	// annotations are applied.
+	pki := newTestPKI(t)
+	cert, key := pki.writeClientPair(t, "system:node:worker-1", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	fake := newFakeNodeAPI("worker-1", "uid-replaced")
+	srv := pki.newTestServer(t, fake.handler())
+	c := pki.newTestClient(t, srv.URL, "worker-1", "uid-original", cert, key)
+
+	if _, err := c.PatchUnschedulableWithAnnotations(context.Background(), true,
+		map[string]string{"sbr.medik8s.io/rejoin-cordon": "incident-7"}); !errors.Is(err, nodeidentity.ErrNodeNameMismatch) {
+		t.Fatalf("want ErrNodeNameMismatch for a replaced Node, got %v", err)
+	}
+	if fake.unschedulable() {
+		t.Fatal("cordon must not be stored when the UID precondition fails")
+	}
+	if _, ok := fake.annotation("sbr.medik8s.io/rejoin-cordon"); ok {
+		t.Fatal("annotation must not be stored when the UID precondition fails")
+	}
+}

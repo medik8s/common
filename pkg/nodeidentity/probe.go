@@ -181,7 +181,7 @@ func (c *Client) RunPermissionMatrix(ctx context.Context, opts ProbeOptions) *Pr
 				fmt.Errorf("intervening cordon update detected; left intact; uncordon permission was not measured"))
 			return
 		}
-		restored, err := c.patchUnschedulableAtVersion(cctx, false, current.Metadata.ResourceVersion)
+		restored, err := c.patchUnschedulableAtVersion(cctx, false, current.Metadata.ResourceVersion, nil)
 		if err == nil && restored.Spec.Unschedulable {
 			err = fmt.Errorf("%w: uncordon accepted but response is still cordoned", ErrAPIServer)
 		}

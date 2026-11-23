@@ -186,6 +186,7 @@ type fakeNodeAPI struct {
 	rv          int
 	conditions  []nodeidentity.Condition
 	taints      []nodeidentity.Taint
+	annotations map[string]string
 	unsched     bool
 	refuseTaint bool
 	conflicts   int
@@ -254,9 +255,10 @@ func (f *fakeNodeAPI) nodeJSON() []byte {
 func (f *fakeNodeAPI) marshalLocked() []byte {
 	n := struct {
 		Metadata struct {
-			Name            string `json:"name"`
-			UID             string `json:"uid"`
-			ResourceVersion string `json:"resourceVersion"`
+			Name            string            `json:"name"`
+			UID             string            `json:"uid"`
+			ResourceVersion string            `json:"resourceVersion"`
+			Annotations     map[string]string `json:"annotations,omitempty"`
 		} `json:"metadata"`
 		Spec struct {
 			Unschedulable bool                 `json:"unschedulable,omitempty"`
@@ -269,11 +271,51 @@ func (f *fakeNodeAPI) marshalLocked() []byte {
 	n.Metadata.Name = f.name
 	n.Metadata.UID = f.uid
 	n.Metadata.ResourceVersion = fmt.Sprintf("%d", f.rv)
+	n.Metadata.Annotations = f.annotations
 	n.Spec.Unschedulable = f.unsched
 	n.Spec.Taints = f.taints
 	n.Status.Conditions = f.conditions
 	b, _ := json.Marshal(n)
 	return b
+}
+
+// setAnnotation pre-seeds an annotation, so tests can assert that a patch
+// merges by key instead of replacing the whole map.
+func (f *fakeNodeAPI) setAnnotation(key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.annotations == nil {
+		f.annotations = map[string]string{}
+	}
+	f.annotations[key] = value
+}
+
+// annotation returns one stored annotation.
+func (f *fakeNodeAPI) annotation(key string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.annotations[key]
+	return v, ok
+}
+
+// mergeAnnotationsLocked applies strategic-merge map semantics to the
+// incoming annotations: a JSON string sets the key, a JSON null removes it.
+func (f *fakeNodeAPI) mergeAnnotationsLocked(in map[string]json.RawMessage) {
+	if in == nil {
+		return
+	}
+	if f.annotations == nil {
+		f.annotations = map[string]string{}
+	}
+	for k, raw := range in {
+		if string(raw) == "null" {
+			delete(f.annotations, k)
+			continue
+		}
+		var v string
+		_ = json.Unmarshal(raw, &v)
+		f.annotations[k] = v
+	}
 }
 
 func (f *fakeNodeAPI) handler() http.Handler {
@@ -363,8 +405,9 @@ func (f *fakeNodeAPI) handler() http.Handler {
 			}
 			var p struct {
 				Metadata struct {
-					UID             string `json:"uid"`
-					ResourceVersion string `json:"resourceVersion"`
+					UID             string                     `json:"uid"`
+					ResourceVersion string                     `json:"resourceVersion"`
+					Annotations     map[string]json.RawMessage `json:"annotations"`
 				} `json:"metadata"`
 				Spec struct {
 					Unschedulable *bool `json:"unschedulable"`
@@ -393,6 +436,7 @@ func (f *fakeNodeAPI) handler() http.Handler {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
+			f.mergeAnnotationsLocked(p.Metadata.Annotations)
 			if len(p.Spec.Taints) > 0 {
 				// Record whether the taint probe requested dry-run
 				// processing, so tests can assert the request shape.

@@ -33,9 +33,10 @@ type Taint struct {
 
 // NodeMeta carries the fields this package validates and uses as preconditions.
 type NodeMeta struct {
-	Name            string `json:"name"`
-	UID             string `json:"uid"`
-	ResourceVersion string `json:"resourceVersion"`
+	Name            string            `json:"name"`
+	UID             string            `json:"uid"`
+	ResourceVersion string            `json:"resourceVersion"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
 }
 
 // NodeStatus carries the conditions this package writes.
